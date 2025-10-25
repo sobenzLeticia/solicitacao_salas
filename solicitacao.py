@@ -1,8 +1,8 @@
 import datetime as dt
 from pathlib import Path
-
 import pandas as pd
 import streamlit as st
+from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Side, Font
 from openpyxl.utils import get_column_letter
@@ -110,37 +110,43 @@ def processar_alocacoes(df_turmas, todas_as_datas, salas_ct):
     return pd.DataFrame(dados)
 
 
-def exportar_dados(df, output_dir, nome="dados_disciplinas.xlsx"):
-    """Exporta os dados processados para Excel."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    caminho = output_dir / nome
+def exportar_dados(df):
+    """Exporta o DataFrame processado para bytes Excel e também salva localmente."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    caminho = OUTPUT_DIR / "dados_disciplinas.xlsx"
     df.to_excel(caminho, index=False)
-    st.success(f"📂 Arquivo exportado: `{caminho}`")
-    return caminho
+
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    return buffer, caminho
 
 
 # ===============================
 # INTERFACE STREAMLIT
 # ===============================
 
-def interface_interativa(salas_ct):
-    """Interface para seleção de bloco, sala, data e horário."""
+def interface_interativa(salas_ct, df_processado):
+    """Interface para seleção de bloco, sala, data e horário + download."""
     st.header("🎯 Solicitação de Sala")
 
-    blocos = sorted(set(s["NOME"].split()[0] for s in salas_ct))
+    # Extrai blocos únicos (apenas a primeira parte do nome da sala)
+    blocos = sorted({s["NOME"].split()[0] for s in salas_ct})
     bloco_selecionado = st.selectbox("Selecione o bloco:", blocos)
 
-    salas_disponiveis = [s["NOME"] for s in salas_ct if bloco_selecionado in s["NOME"]]
-    sala_escolhida = st.selectbox("Selecione a sala:", salas_disponiveis)
+    # Filtra salas do bloco escolhido
+    salas_filtradas = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_selecionado)]
+    sala_escolhida = st.selectbox("Selecione a sala:", salas_filtradas)
 
     data_escolhida = st.date_input("Selecione a data:")
     horario_inicio = st.time_input("Horário de início:")
     horario_fim = st.time_input("Horário de término:")
 
     sala_info = next((s for s in salas_ct if s["NOME"] == sala_escolhida), None)
+
     if sala_info:
         if sala_info["HORARIOS_OCUPADOS"]:
-            st.info(f"🕓 Horários ocupados: {', '.join(sala_info['HORARIOS_OCUPADOS'])}")
+            st.info(f"🕓 Horários ocupados: {', '.join(sorted(sala_info['HORARIOS_OCUPADOS']))}")
         else:
             st.success("✅ Nenhum horário ocupado encontrado para esta sala.")
 
@@ -161,6 +167,14 @@ def interface_interativa(salas_ct):
                        f"({horario_inicio.strftime('%H:%M')}–{horario_fim.strftime('%H:%M')})")
             sala_info["HORARIOS_OCUPADOS"].add(f"{horario_inicio.strftime('%H:%M')} - {horario_fim.strftime('%H:%M')}")
 
+    # Botão de download
+    st.download_button(
+        label="📥 Baixar Excel Processado",
+        data=exportar_dados(df_processado)[0],
+        file_name="dados_disciplinas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 # ===============================
 # APP PRINCIPAL
@@ -175,11 +189,9 @@ def main():
         todas_as_datas = gerar_datas(df_turmas)
         df_dados = processar_alocacoes(df_turmas, todas_as_datas, salas_ct)
 
-    st.success("✅ Dados carregados com sucesso!")
-    exportar_dados(df_dados, OUTPUT_DIR)
-
+    st.success("✅ Dados carregados e processados com sucesso!")
     st.divider()
-    interface_interativa(salas_ct)
+    interface_interativa(salas_ct, df_dados)
 
 
 if __name__ == "__main__":
