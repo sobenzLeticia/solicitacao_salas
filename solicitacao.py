@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR
 
-CAMINHO_SALAS = DATA_DIR / "SALAS.xlsx"
+CAMINHO_SALAS = DATA_DIR / "SALAS - COPIA.xlsx"
 CAMINHO_DISCIPLINAS = DATA_DIR / "Resultados_Gerais.xlsx"
 OUTPUT_DIR = BASE_DIR / "resultados"
 
