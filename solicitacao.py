@@ -122,6 +122,14 @@ def exportar_dados(df):
     return buffer, caminho
 
 
+def gerar_intervalos(inicio, fim, meio):
+    horarios_intermediarios = []
+    horario_atual = inicio
+    while horario_atual <= fim:
+        horarios_intermediarios.append(horario_atual)
+        horario_atual += meio
+    return horarios_intermediarios
+
 # ===============================
 # INTERFACE STREAMLIT
 # ===============================
@@ -153,12 +161,30 @@ def interface_interativa(salas_ct, df_processado):
     if st.button("📅 Solicitar Sala"):
         if not sala_info:
             st.error("Sala não encontrada.")
-            return
+            st.stop()
 
-        conflito = any(
-            horario_inicio.strftime("%H:%M") in h or horario_fim.strftime("%H:%M") in h
-            for h in sala_info["HORARIOS_OCUPADOS"]
-        )
+        # --- NOVA LÓGICA DE CONFLITO ---
+        def _para_minutos(t: dt.time) -> int:
+            return t.hour * 60 + t.minute
+
+        inicio_sol = _para_minutos(horario_inicio)
+        fim_sol = _para_minutos(horario_fim)
+
+        conflito = False
+        for h_ocup in sala_info["HORARIOS_OCUPADOS"]:
+            # h_ocup pode estar no formato "HH:MM - HH:MM"
+            try:
+                h_ini_str, h_fim_str = h_ocup.split(" - ")
+                ini_ocup = _para_minutos(dt.time.fromisoformat(h_ini_str))
+                fim_ocup = _para_minutos(dt.time.fromisoformat(h_fim_str))
+            except ValueError:
+                # caso ainda esteja no formato antigo "HH:MM - HH:MM" sem o split
+                continue
+
+            # detecta sobreposição
+            if inicio_sol < fim_ocup and fim_sol > ini_ocup:
+                conflito = True
+                break
 
         if conflito:
             st.error("❌ A sala está ocupada no horário selecionado.")
