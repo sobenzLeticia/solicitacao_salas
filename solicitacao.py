@@ -111,8 +111,25 @@ def processar_alocacoes(df_turmas, todas_as_datas, salas_ct):
                 s["DATAS"].update(datas)
                 s["HORARIOS_OCUPADOS"].add(aloc["HORARIO"])
                 # As chaves 'HORARIO INICIO' e 'HORARIO FINAL' foram adicionadas em criar_lista_salas
-                s["HORARIO INICIO"].add(aloc["HORARIO INICIO"])
-                s["HORARIO FINAL"].add(aloc["HORARIO FINAL"])
+                
+                # Tentativa de converter para dt.time, se não for. Isso é crucial para a função gerar_intervalos.
+                horario_inicio_obj = aloc["HORARIO INICIO"]
+                if isinstance(horario_inicio_obj, str):
+                    try:
+                        horario_inicio_obj = dt.datetime.strptime(horario_inicio_obj, "%H:%M:%S").time()
+                    except ValueError:
+                        # Se falhar, assume que é uma string e tenta converter para dt.time
+                        horario_inicio_obj = dt.datetime.strptime(horario_inicio_obj, "%H:%M").time()
+                
+                horario_final_obj = aloc["HORARIO FINAL"]
+                if isinstance(horario_final_obj, str):
+                    try:
+                        horario_final_obj = dt.datetime.strptime(horario_final_obj, "%H:%M:%S").time()
+                    except ValueError:
+                        horario_final_obj = dt.datetime.strptime(horario_final_obj, "%H:%M").time()
+                        
+                s["HORARIO INICIO"].add(horario_inicio_obj)
+                s["HORARIO FINAL"].add(horario_final_obj)
 
     return pd.DataFrame(dados)
 
@@ -171,11 +188,8 @@ def interface_interativa(salas_ct, df_processado):
     sala_info = next((s for s in salas_ct if s["NOME"] == sala_escolhida), None)
 
     if sala_info:
-        # Conversão dos sets de horários de início e fim para strings para exibição
-        horarios_ocupados_str = {
-            f"{h_ini.strftime('%H:%M')} - {h_fim.strftime('%H:%M')}"
-            for h_ini, h_fim in zip(sala_info['HORARIO INICIO'], sala_info['HORARIO FINAL'])
-        }
+        # O set 'HORARIOS_OCUPADOS' já contém as strings de horário de alocação (ex: "18:00 - 20:00").
+        horarios_ocupados_str = sala_info["HORARIOS_OCUPADOS"]
         
         if horarios_ocupados_str:
             st.info(f"🕓 Horários ocupados (alocados): {', '.join(sorted(horarios_ocupados_str))}")
