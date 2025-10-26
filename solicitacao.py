@@ -131,7 +131,7 @@ def interface_interativa(salas_ct, df_processado):
     st.header("🎯 Solicitação de Sala")
 
     # Extrai blocos únicos (apenas a primeira parte do nome da sala)
-    blocos = sorted({s["NOME"].split()[0] for s in salas_ct})
+    blocos = ["707","717","726","727"]
     bloco_selecionado = st.selectbox("Selecione o bloco:", blocos)
 
     # Filtra salas do bloco escolhido
