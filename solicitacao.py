@@ -106,6 +106,8 @@ def processar_alocacoes(df_turmas, todas_as_datas, salas_ct):
             if s["NOME"] == sala:
                 s["DATAS"].update(datas)
                 s["HORARIOS_OCUPADOS"].add(aloc["HORARIO"])
+                s["HORARIO INICIO"].add(aloc["HORARIO INICIO"])
+                s["HORARIO FINAL"].add(aloc["HORARIO FINAL"])
 
     return pd.DataFrame(dados)
 
@@ -161,32 +163,20 @@ def interface_interativa(salas_ct, df_processado):
     if st.button("📅 Solicitar Sala"):
         if not sala_info:
             st.error("Sala não encontrada.")
-            st.stop()
+            return
 
-        # --- NOVA LÓGICA DE CONFLITO ---
-        def _para_minutos(t: dt.time) -> int:
-            return t.hour * 60 + t.minute
+        conflito = any(
+            horario_inicio.strftime("%H:%M") in h or horario_fim.strftime("%H:%M") in h
+            for h in sala_info["HORARIOS_OCUPADOS"]
+        )
+        intervalo = dt.timedelta(minutes=1)
+        ini = sala_info["HORARIOS INICIO"]
+        f = sala_info["HORARIO FINAL"]
+        horario_intervalo = gerar_intervalos(ini, f, intervalo)
+        amostra = [True if horario_inicio in h or horario_fim in h else False for h in horario_intervalo]
+        conflito_2 = any(amostra)
 
-        inicio_sol = _para_minutos(horario_inicio)
-        fim_sol = _para_minutos(horario_fim)
-
-        conflito = False
-        for h_ocup in sala_info["HORARIOS_OCUPADOS"]:
-            # h_ocup pode estar no formato "HH:MM - HH:MM"
-            try:
-                h_ini_str, h_fim_str = h_ocup.split(" - ")
-                ini_ocup = _para_minutos(dt.time.fromisoformat(h_ini_str))
-                fim_ocup = _para_minutos(dt.time.fromisoformat(h_fim_str))
-            except ValueError:
-                # caso ainda esteja no formato antigo "HH:MM - HH:MM" sem o split
-                continue
-
-            # detecta sobreposição
-            if inicio_sol < fim_ocup and fim_sol > ini_ocup:
-                conflito = True
-                break
-
-        if conflito:
+        if conflito or conflito_2:
             st.error("❌ A sala está ocupada no horário selecionado.")
         else:
             st.success(f"✅ Solicitação registrada para **{sala_escolhida}** em {data_escolhida} "
