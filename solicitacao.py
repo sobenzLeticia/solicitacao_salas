@@ -356,6 +356,8 @@ def interface_interativa(salas_ct, df_processado):
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
 
             st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_ini} ({inicio_str} - {fim_str})")
+            # que a tela será recarregada com os novos dados
+            st.rerun()
 
     # ---------- Download Excel da sala ----------
     st.divider()
