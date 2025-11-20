@@ -1,42 +1,80 @@
 import datetime as dt
 from pathlib import Path
+from io import BytesIO
 import pandas as pd
 import streamlit as st
-from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Side, Font
 from openpyxl.utils import get_column_letter
 
-
 # ===============================
 # CONFIGURAÇÕES GERAIS
 # ===============================
-
-# Caminhos relativos dentro do repositório
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR
 
 CAMINHO_SALAS = DATA_DIR / "SALAS - COPIA.xlsx"
 CAMINHO_DISCIPLINAS = DATA_DIR / "Resultados_Gerais.xlsx"
 OUTPUT_DIR = BASE_DIR / "resultados"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
 INDICE_DIAS = {d: i for i, d in enumerate(DIAS_SEMANA)}
 
+# ===============================
+# UTILITÁRIOS DE HORÁRIO
+# ===============================
+
+def str_to_time(s: str) -> dt.time:
+    """Tenta converter strings para dt.time aceitando vários formatos."""
+    if pd.isna(s):
+        return None
+    s = str(s).strip()
+    for fmt in ("%H:%M", "%H:%M:%S", "%H.%M"):
+        try:
+            return dt.datetime.strptime(s, fmt).time()
+        except Exception:
+            pass
+    # tenta extrair apenas os dois primeiros números
+    try:
+        parts = ''.join(ch if ch.isdigit() or ch == ':' else '' for ch in s)
+        return dt.datetime.strptime(parts, "%H:%M").time()
+    except Exception:
+        return None
+
+
+def normalize_interval(start, end) -> str:
+    """Recebe dt.time ou strings e retorna 'HH:MM - HH:MM'"""
+    t1 = start if isinstance(start, dt.time) else str_to_time(start)
+    t2 = end if isinstance(end, dt.time) else str_to_time(end)
+    if not t1 or not t2:
+        return None
+    return f"{t1.strftime('%H:%M')} - {t2.strftime('%H:%M')}"
+
+
+def time_to_minutes(t: dt.time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def intervals_overlap(a_start: str, a_end: str, b_start: str, b_end: str) -> bool:
+    a_s = time_to_minutes(str_to_time(a_start))
+    a_e = time_to_minutes(str_to_time(a_end))
+    b_s = time_to_minutes(str_to_time(b_start))
+    b_e = time_to_minutes(str_to_time(b_end))
+    return max(a_s, b_s) < min(a_e, b_e)
 
 # ===============================
-# FUNÇÕES DE LEITURA E PROCESSAMENTO
+# LEITURA E PROCESSAMENTO
 # ===============================
 
 @st.cache_data(show_spinner=False)
 def carregar_dados():
-    """Carrega os dados de salas e turmas do repositório."""
+    """Carrega dados de salas e turmas. Lança erro amigável se não achar arquivos."""
     if not CAMINHO_SALAS.exists():
-        st.error(f"❌ Arquivo de salas não encontrado em: {CAMINHO_SALAS}")
+        st.error(f"Arquivo de salas não encontrado: {CAMINHO_SALAS}")
         st.stop()
-
     if not CAMINHO_DISCIPLINAS.exists():
-        st.error(f"❌ Arquivo de disciplinas não encontrado em: {CAMINHO_DISCIPLINAS}")
+        st.error(f"Arquivo de disciplinas não encontrado: {CAMINHO_DISCIPLINAS}")
         st.stop()
 
     df_salas = pd.read_excel(CAMINHO_SALAS)
@@ -44,267 +82,334 @@ def carregar_dados():
     return df_salas, df_turmas
 
 
-def criar_lista_salas(df_salas):
-    """Cria estrutura de salas com capacidade e controle de horários."""
-    return [
-        {
-            "NOME": row["SALAS"],
-            "CAPACIDADE": row["CAPACIDADE"],
-            "DATAS": set(),
-            "HORARIOS_OCUPADOS": set(),
-            "HORARIO INICIO": set(),  # Adicionado para evitar KeyError/AttributeError
-            "HORARIO FINAL": set(),  # Adicionado para evitar KeyError/AttributeError
-        }
-        for _, row in df_salas.iterrows()
-    ]
+def criar_lista_salas(df_salas: pd.DataFrame):
+    """Cria estrutura de salas a partir do DataFrame de salas."""
+    salas = []
+    for _, row in df_salas.iterrows():
+        nome = str(row.get('SALAS') or row.get('SALA') or row.get('NOME') or '')
+        capacidade = int(row.get('CAPACIDADE') or 0)
+        salas.append({
+            'NOME': nome.strip(),
+            'CAPACIDADE': capacidade,
+            # Lista de reservas como tuplas (data, inicio, fim, descricao)
+            'RESERVAS': [],
+            # Horários ocupados por semana (dia -> list de (inicio,fim,descricao))
+            'HORARIOS_OCUPADOS_SEMANA': {d: [] for d in DIAS_SEMANA},
+        })
+    return salas
 
 
-def gerar_datas(df_turmas):
-    """Gera todas as datas entre o início e o fim definidos na planilha."""
-    # Assumindo que os dados da planilha são strings no formato "d,m,a" ou similar
-    # e que o código original está correto ao usar dt.date(*data_partes)
-    data_inicio = list(map(int, df_turmas.iloc[0, 13].split(",")))
-    data_final = list(map(int, df_turmas.iloc[0, 14].split(",")))
-    return pd.date_range(dt.date(*data_inicio), dt.date(*data_final))
+def gerar_datas(df_turmas: pd.DataFrame):
+    """Tenta extrair data início/fim. Se houver colunas nomeadas usa-as, senão tenta heurística."""
+    # procura colunas comuns
+    cols = [c.upper() for c in df_turmas.columns]
+    if 'DATA INICIO' in cols or 'DATA_INICIO' in cols or 'DATAINICIO' in cols:
+        # pega pelo nome original
+        for c in df_turmas.columns:
+            if str(c).upper().replace('_', ' ') == 'DATA INICIO':
+                data_inicio = pd.to_datetime(df_turmas[c].iloc[0]).date()
+                break
+    else:
+        # fallback para o comportamento original (colunas 13/14 contendo 'YYYY,MM,DD')
+        try:
+            start_list = list(map(int, str(df_turmas.iloc[0, 13]).split(',')))
+            data_inicio = dt.date(*start_list)
+        except Exception:
+            data_inicio = pd.to_datetime(df_turmas.iloc[:, 0].min()).date()
+
+    if 'DATA FINAL' in cols or 'DATA_FINAL' in cols or 'DATAFINAL' in cols:
+        for c in df_turmas.columns:
+            if str(c).upper().replace('_', ' ') == 'DATA FINAL':
+                data_final = pd.to_datetime(df_turmas[c].iloc[0]).date()
+                break
+    else:
+        try:
+            end_list = list(map(int, str(df_turmas.iloc[0, 14]).split(',')))
+            data_final = dt.date(*end_list)
+        except Exception:
+            data_final = pd.to_datetime(df_turmas.iloc[:, 0].max()).date()
+
+    if data_final < data_inicio:
+        data_final = data_inicio
+
+    return pd.date_range(start=data_inicio, end=data_final)
 
 
-def processar_alocacoes(df_turmas, todas_as_datas, salas_ct):
-    """Processa as turmas e cria DataFrame com dados das disciplinas."""
-    dados = []
+def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas: pd.DatetimeIndex, salas_ct: list):
+    """Gera lista de alocações normalizadas e preenche HORARIOS_OCUPADOS_SEMANA nas salas."""
+    registros = []
 
     for _, aloc in df_turmas.iterrows():
-        if aloc.get("STATUS") != "Alocada":
+        status = str(aloc.get('STATUS') or '').strip()
+        if status.upper() != 'ALOCADA':
             continue
 
-        sala = aloc["SALA"]
-        dias = aloc.get("DIAS")
-        if pd.isna(dias):
+        sala = str(aloc.get('SALA') or aloc.get('SALAS') or '').strip()
+        if not sala:
             continue
 
-        capacidade = next(
-            (s["CAPACIDADE"] for s in salas_ct if s["NOME"] == sala),
-            None
-        )
+        dias_raw = str(aloc.get('DIAS') or '').strip()
+        if not dias_raw:
+            continue
 
-        dias_lista = dias.split()
-        indices = [INDICE_DIAS.get(dia) for dia in dias_lista if dia in INDICE_DIAS]
+        # Normaliza dias: aceita espaço, vírgula ou ';' como separadores
+        dias_tokens = [t.strip().upper() for t in re_split_days(dias_raw)]
+        dias_validos = [d for d in dias_tokens if d in INDICE_DIAS]
+        if not dias_validos:
+            continue
+
+        inicio = aloc.get('HORARIO INICIO') or aloc.get('HORARIO') or aloc.get('HORÁRIO INICIO')
+        fim = aloc.get('HORARIO FINAL') or aloc.get('HORÁRIO FINAL') or aloc.get('HORARIO_FIM')
+        intervalo_normal = normalize_interval(inicio, fim)
+        if not intervalo_normal:
+            # tenta extrair de uma coluna HORARIO no formato 'SEGUNDA 07:00-08:00, ...'
+            # nesse caso processaremos abaixo como lista de blocos
+            pass
+
+        codigo = aloc.get('CODIGO') or ''
+        disciplina = aloc.get('DISCIPLINA') or ''
+        turma = aloc.get('TURMA') or ''
+        professor = aloc.get('PROFESSOR') or ''
+        alunos = aloc.get('ALUNOS') or 0
+
+        # Desc opcional
+        descricao = f"{codigo} - {disciplina} - {turma} - {professor}"
+
+        # datas do semestre/periodo para esses dias
+        indices = [INDICE_DIAS[d] for d in dias_validos]
         datas = todas_as_datas[todas_as_datas.dayofweek.isin(indices)]
 
-        dados.append({
-            "CURSO": aloc["CURSO"],
-            "CODIGO": aloc["CODIGO"],
-            "SALA": sala,
-            "DISCIPLINA": aloc["DISCIPLINA"],
-            "TURMA": aloc["TURMA"],
-            "DIAS": dias,
-            "HORARIO INICIO": aloc["HORARIO INICIO"],
-            "HORARIO FINAL": aloc["HORARIO FINAL"],
-            "HORARIOS": aloc["HORARIO"],
-            "ALUNOS": aloc["ALUNOS"],
-            "PROFESSOR": aloc["PROFESSOR"],
-            "CAPACIDADE": capacidade,
-            "DATAS": datas,
-        })
+        registro = {
+            'CURSO': aloc.get('CURSO'),
+            'CODIGO': codigo,
+            'SALA': sala,
+            'DISCIPLINA': disciplina,
+            'TURMA': turma,
+            'DIAS': ','.join(dias_validos),
+            'HORARIO_INICIO': str_to_time(inicio),
+            'HORARIO_FINAL': str_to_time(fim),
+            'HORARIOS_RAW': aloc.get('HORARIO') or aloc.get('HORÁRIO') or '',
+            'ALUNOS': alunos,
+            'PROFESSOR': professor,
+            'DATAS': datas,
+            'DESCRICAO': descricao,
+        }
+        registros.append(registro)
 
-        for s in salas_ct:
-            if s["NOME"] == sala:
-                s["DATAS"].update(datas)
-                s["HORARIOS_OCUPADOS"].add(aloc["HORARIO"])
-                # As chaves 'HORARIO INICIO' e 'HORARIO FINAL' foram adicionadas em criar_lista_salas
-                
-                # Tentativa de converter para dt.time, se não for. Isso é crucial para a função gerar_intervalos.
-                horario_inicio_obj = aloc["HORARIO INICIO"]
-                if isinstance(horario_inicio_obj, str):
-                    try:
-                        horario_inicio_obj = dt.datetime.strptime(horario_inicio_obj, "%H:%M:%S").time()
-                    except ValueError:
-                        # Se falhar, assume que é uma string e tenta converter para dt.time
-                        horario_inicio_obj = dt.datetime.strptime(horario_inicio_obj, "%H:%M").time()
-                
-                horario_final_obj = aloc["HORARIO FINAL"]
-                if isinstance(horario_final_obj, str):
-                    try:
-                        horario_final_obj = dt.datetime.strptime(horario_final_obj, "%H:%M:%S").time()
-                    except ValueError:
-                        horario_final_obj = dt.datetime.strptime(horario_final_obj, "%H:%M").time()
-                        
-                s["HORARIO INICIO"].add(horario_inicio_obj)
-                s["HORARIO FINAL"].add(horario_final_obj)
+        # Atualiza a sala correspondente
+        sala_obj = next((s for s in salas_ct if s['NOME'] == sala), None)
+        if sala_obj:
+            # Preenche reservas semanais por dia
+            for d in dias_validos:
+                if registro['HORARIO_INICIO'] and registro['HORARIO_FINAL']:
+                    sala_obj['HORARIOS_OCUPADOS_SEMANA'][d].append((registro['HORARIO_INICIO'].strftime('%H:%M'),
+                                                                     registro['HORARIO_FINAL'].strftime('%H:%M'),
+                                                                     descricao))
+                else:
+                    # Se não existirem colunas separadas de início/fim, tenta extrair da coluna HORARIOS_RAW
+                    raw = registro['HORARIOS_RAW']
+                    # espera blocos como 'SEGUNDA 07:00-08:00, TERÇA 09:00-10:00'
+                    blocos = [b.strip() for b in str(raw).split(',') if b.strip()]
+                    for bloco in blocos:
+                        try:
+                            parts = bloco.split()
+                            dia = parts[0].upper()
+                            hora_part = parts[1]
+                            h_start, h_end = hora_part.split('-')
+                            if dia in DIAS_SEMANA:
+                                sala_obj['HORARIOS_OCUPADOS_SEMANA'][dia].append((h_start, h_end, descricao))
+                        except Exception:
+                            continue
 
-    return pd.DataFrame(dados)
+    df_reg = pd.DataFrame(registros)
+    return df_reg
 
+# função auxiliar usada acima
+import re
 
-def exportar_dados(df):
-    """Exporta o DataFrame processado para bytes Excel e também salva localmente."""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    caminho = OUTPUT_DIR / "dados_disciplinas.xlsx"
-    df.to_excel(caminho, index=False)
+def re_split_days(s: str):
+    # separa por vírgula, ponto e vírgula, barra, ou espaços múltiplos
+    parts = re.split(r'[;,/\\]+|\s{2,}|\s', s)
+    return [p for p in parts if p]
 
-    buffer = BytesIO()
-    df.to_excel(buffer, index=False)
-    buffer.seek(0)
-    return buffer, caminho
+# ===============================
+# GERAÇÃO DO EXCEL (por sala)
+# ===============================
 
+def criar_workbook_horario_sala(sala_obj, horas_minutos=None):
+    """Cria um Workbook do Excel contendo apenas o quadro semanal da sala."""
+    if horas_minutos is None:
+        horas_minutos = []
+        for h in range(7, 22):
+            horas_minutos.append(f"{h:02d}:00 - {h:02d}:30")
+            horas_minutos.append(f"{h:02d}:30 - {h+1:02d}:00")
 
-def gerar_intervalos(inicio, fim, meio):
-    """
-    Gera uma lista de horários intermediários.
-    Corrigido para usar a lógica de comparação e adição de objetos datetime.time.
-    """
-    horarios_intermediarios = []
-    # Converte dt.time para dt.datetime para permitir operações de tempo
-    # Usando uma data base arbitrária (e.g., hoje)
-    hoje = dt.date.today()
-    horario_atual = dt.datetime.combine(hoje, inicio)
-    horario_fim_dt = dt.datetime.combine(hoje, fim)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sala_obj['NOME'][:31]
 
-    while horario_atual <= horario_fim_dt:
-        horarios_intermediarios.append(horario_atual.time())
-        horario_atual += meio
-    return horarios_intermediarios
+    dias = DIAS_SEMANA
 
+    # Cabeçalho
+    info_sala = f"Centro de Tecnologia | {sala_obj['NOME']} | Capacidade: {sala_obj['CAPACIDADE']}"
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(dias) + 1)
+    cell_info = ws.cell(row=1, column=1, value=info_sala)
+    cell_info.font = Font(bold=True, size=12)
+    cell_info.alignment = Alignment(horizontal='center', vertical='center')
+
+    ws.cell(row=2, column=1, value='Horário').font = Font(bold=True)
+    for col, dia in enumerate(dias, start=2):
+        ws.cell(row=2, column=col, value=dia).font = Font(bold=True)
+
+    for row, hora in enumerate(horas_minutos, start=3):
+        ws.cell(row=row, column=1, value=hora)
+
+    # Preenche horários ocupados
+    for col, dia in enumerate(dias, start=2):
+        ocupados = sala_obj['HORARIOS_OCUPADOS_SEMANA'].get(dia, [])
+        for inicio, fim, desc in ocupados:
+            # preenche todos os intervalos 30min que estiverem dentro do bloco
+            t_start = str_to_time(inicio)
+            t_end = str_to_time(fim)
+            if not t_start or not t_end:
+                continue
+            cur = dt.datetime.combine(dt.date.today(), t_start)
+            fim_dt = dt.datetime.combine(dt.date.today(), t_end)
+            while cur < fim_dt:
+                next_dt = cur + dt.timedelta(minutes=30)
+                label = f"{cur.time().strftime('%H:%M')} - {next_dt.time().strftime('%H:%M')}"
+                try:
+                    row_idx = horas_minutos.index(label) + 3
+                except ValueError:
+                    cur = next_dt
+                    continue
+                ws.cell(row=row_idx, column=col, value=desc)
+                cur = next_dt
+
+    # Mesclar células verticalmente onde o mesmo valor se repete
+    for col in range(2, len(dias) + 2):
+        start_row = 3
+        current_value = ws.cell(row=3, column=col).value
+        for row in range(3, len(horas_minutos) + 3):
+            value = ws.cell(row=row, column=col).value
+            if value != current_value:
+                if current_value not in (None, '') and row - 1 >= start_row:
+                    ws.merge_cells(start_row=start_row, start_column=col, end_row=row - 1, end_column=col)
+                start_row = row
+                current_value = value
+        if current_value not in (None, '') and start_row <= len(horas_minutos) + 2:
+            ws.merge_cells(start_row=start_row, start_column=col, end_row=len(horas_minutos) + 2, end_column=col)
+
+    # Estilos básicos
+    thin = Side(style='thin')
+    borda_fina = Border(left=thin, right=thin, top=thin, bottom=thin)
+    alinhamento_centro = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    fonte_padrao = Font(size=10)
+
+    for row in ws.iter_rows(min_row=1, max_row=len(horas_minutos) + 2, min_col=1, max_col=len(dias) + 1):
+        for cell in row:
+            cell.border = borda_fina
+            cell.alignment = alinhamento_centro
+            cell.font = fonte_padrao
+
+    for col in range(1, len(dias) + 2):
+        ws.column_dimensions[get_column_letter(col)].width = 25
+
+    return wb
 
 # ===============================
 # INTERFACE STREAMLIT
 # ===============================
 
 def interface_interativa(salas_ct, df_processado):
-    """Interface para seleção de bloco, sala, data e horário + download."""
     st.header("🎯 Solicitação de Sala")
 
-    # Extrai blocos únicos (apenas a primeira parte do nome da sala)
-    # O código original tinha uma lista fixa, mantendo a lógica, mas idealmente deveria ser dinâmico.
-    blocos = ["707","717","726","727"]
-    bloco_selecionado = st.selectbox("Selecione o bloco:", blocos)
+    # Detecta blocos automaticamente a partir dos prefixos das salas (3 primeiros chars)
+    blocos_detectados = sorted({s['NOME'][:3] for s in salas_ct if s['NOME']})
+    if not blocos_detectados:
+        st.error('Nenhuma sala encontrada nas planilhas.')
+        return
 
-    # Filtra salas do bloco escolhido
-    salas_filtradas = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_selecionado)]
+    bloco_selecionado = st.selectbox("Selecione o bloco:", blocos_detectados)
+    salas_filtradas = [s['NOME'] for s in salas_ct if s['NOME'].startswith(bloco_selecionado)]
     sala_escolhida = st.selectbox("Selecione a sala:", salas_filtradas)
 
     data_escolhida = st.date_input("Selecione a data:")
     horario_inicio = st.time_input("Horário de início:")
     horario_fim = st.time_input("Horário de término:")
 
-    sala_info = next((s for s in salas_ct if s["NOME"] == sala_escolhida), None)
+    sala_info = next((s for s in salas_ct if s['NOME'] == sala_escolhida), None)
+    if not sala_info:
+        st.error('Sala não encontrada.')
+        return
 
-    if sala_info:
-        # O set 'HORARIOS_OCUPADOS' já contém as strings de horário de alocação (ex: "18:00 - 20:00").
-        horarios_ocupados_str = sala_info["HORARIOS_OCUPADOS"]
-        
-        if horarios_ocupados_str:
-            st.info(f"🕓 Horários ocupados (alocados): {', '.join(sorted(horarios_ocupados_str))}")
+    # Mostrar horários semanais ocupados
+    st.subheader('Horários ocupados (por dia da semana)')
+    for dia in DIAS_SEMANA:
+        ocup = sala_info['HORARIOS_OCUPADOS_SEMANA'].get(dia, [])
+        if ocup:
+            st.write(f"**{dia}**: ", ', '.join([f"{a}-{b} ({c})" for a, b, c in ocup]))
         else:
-            st.success("✅ Nenhum horário ocupado encontrado para esta sala.")
+            st.write(f"**{dia}**: Nenhum")
 
-    if st.button("📅 Solicitar Sala"):
-        if not sala_info:
-            st.error("Sala não encontrada.")
-            return
+    # Verifica conflito
+    if st.button('📅 Solicitar Sala'):
+        inicio_str = horario_inicio.strftime('%H:%M')
+        fim_str = horario_fim.strftime('%H:%M')
+        dia_semana = data_escolhida.strftime('%A').upper()
+        # mapeia inglês para português se necessário
+        mapping = {
+            'MONDAY': 'SEGUNDA', 'TUESDAY': 'TERÇA', 'WEDNESDAY': 'QUARTA',
+            'THURSDAY': 'QUINTA', 'FRIDAY': 'SEXTA', 'SATURDAY': 'SÁBADO', 'SUNDAY': 'DOMINGO'
+        }
+        dia_semana = mapping.get(dia_semana, dia_semana)
 
-        # Conflito 1: Checa se o horário de início ou fim está contido em um horário ocupado (string)
-        # O código original usava `horario_inicio.strftime("%H:%M") in h`
-        # Isso só funciona se `h` for um set de strings de horários, o que não é o caso aqui.
-        # `sala_info["HORARIOS_OCUPADOS"]` contém strings de horários (ex: "18:00 - 20:00")
-        horario_inicio_str = horario_inicio.strftime("%H:%M")
-        horario_fim_str = horario_fim.strftime("%H:%M")
-        
-        # A lógica original parece tentar verificar se os horários de início ou fim
-        # estão contidos em alguma string de horário ocupado.
-        conflito = any(
-            horario_inicio_str in h or horario_fim_str in h
-            for h in sala_info["HORARIOS_OCUPADOS"]
-        )
+        conflitos = []
+        for a, b, desc in sala_info['HORARIOS_OCUPADOS_SEMANA'].get(dia_semana, []):
+            if intervals_overlap(a, b, inicio_str, fim_str):
+                conflitos.append((a, b, desc))
 
-        # Conflito 2: Checa sobreposição usando a função gerar_intervalos
-        # O código original estava incorreto ao tentar acessar "HORARIOS INICIO" e "HORARIO FINAL"
-        # como se fossem um único objeto datetime.time, e não um set.
-        # Além disso, a função gerar_intervalos foi corrigida para aceitar dt.time e dt.timedelta
-        
-        # Para manter a lógica original (que parecia tentar gerar um intervalo a partir
-        # de todos os horários de início e fim registrados, o que é estranho),
-        # vamos usar os sets de horários de início e fim para a verificação.
-        # A lógica mais provável é que o usuário queria checar se o intervalo
-        # solicitado se sobrepõe a qualquer intervalo já alocado.
-        # Como a lógica original usa `gerar_intervalos` com os sets, e isso é um erro,
-        # vou tentar corrigir *mantendo a intenção* de verificar a sobreposição,
-        # mas usando os sets de horários de início e fim que agora estão disponíveis.
-        
-        # A correção mais fiel à lógica original (mesmo que errada) é:
-        # Acessar o primeiro elemento do set, o que é perigoso, ou assumir que o set
-        # só tem um elemento, o que é incorreto.
-        # Vou assumir que o usuário queria pegar o *menor* horário de início e o *maior*
-        # horário final de *todas* as alocações da sala para criar um grande intervalo,
-        # o que é uma lógica estranha, mas é a única que se encaixa no uso de `ini` e `f`
-        # como argumentos únicos para `gerar_intervalos`.
-        
-        try:
-            # Pega o menor horário de início e o maior horário final de todas as alocações da sala
-            ini = min(sala_info["HORARIO INICIO"]) if sala_info["HORARIO INICIO"] else dt.time(0, 0)
-            f = max(sala_info["HORARIO FINAL"]) if sala_info["HORARIO FINAL"] else dt.time(0, 0)
-        except TypeError:
-            # Caso os sets estejam vazios ou contenham tipos misturados, o que não deveria ocorrer após a correção.
-            ini = dt.time(0, 0)
-            f = dt.time(0, 0)
-            
-        intervalo = dt.timedelta(minutes=1)
-        
-        # A função gerar_intervalos foi corrigida para aceitar dt.time e dt.timedelta
-        # O resultado é uma lista de objetos dt.time
-        horario_intervalo = gerar_intervalos(ini, f, intervalo)
-        
-        # A lógica original (linha 176) checa se o horário de início ou fim solicitado
-        # está presente na lista de horários intermediários gerados.
-        # Isso só faz sentido se `horario_intervalo` contiver todos os minutos
-        # entre o primeiro horário de início e o último horário final.
-        # E mesmo assim, a verificação é falha.
-        
-        # Corrigindo a verificação da linha 176 para usar dt.time
-        amostra = [
-            True if h == horario_inicio or h == horario_fim else False 
-            for h in horario_intervalo
-        ]
-        
-        conflito_2 = any(amostra)
-
-        if conflito or conflito_2:
-            st.error("❌ A sala está ocupada no horário selecionado.")
+        if conflitos:
+            st.error('❌ A sala está ocupada no horário selecionado: ' + ', '.join([f"{a}-{b} ({c})" for a, b, c in conflitos]))
         else:
-            st.success(f"✅ Solicitação registrada para **{sala_escolhida}** em {data_escolhida} "
-                       f"({horario_inicio_str}–{horario_fim_str})")
-            # Adiciona a string do horário ocupado ao set de strings
-            sala_info["HORARIOS_OCUPADOS"].add(f"{horario_inicio_str} - {horario_fim_str}")
-            # Adiciona os objetos dt.time aos sets de início e fim
-            sala_info["HORARIO INICIO"].add(horario_inicio)
-            sala_info["HORARIO FINAL"].add(horario_fim)
+            # registra reserva (em memória apenas)
+            sala_info['RESERVAS'].append((data_escolhida, inicio_str, fim_str, 'RESERVA MANUAL'))
+            st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_escolhida} ({inicio_str} - {fim_str})")
 
+    st.divider()
 
-    # Botão de download
-    buffer, caminho = exportar_dados(df_processado)
-    st.download_button(
-        label="📥 Baixar Excel Processado",
-        data=buffer,
-        file_name="dados_disciplinas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    # Gerar e permitir download do Excel apenas para a sala selecionada
+    if st.button('📥 Gerar Excel da Sala Selecionada'):
+        wb = criar_workbook_horario_sala(sala_info)
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        st.download_button("Baixar Excel (Sala)", data=buffer, file_name=f"horario_{sala_escolhida}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+    # Também permitir download do DataFrame processado completo
+    st.divider()
+    st.subheader('Exportar dados processados (todas as turmas)')
+    buffer_df = BytesIO()
+    df_processado.to_excel(buffer_df, index=False)
+    buffer_df.seek(0)
+    st.download_button('📥 Baixar dados_disciplinas.xlsx', data=buffer_df, file_name='dados_disciplinas.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 # ===============================
 # APP PRINCIPAL
 # ===============================
 
 def main():
-    st.title("🏫 Sistema de Alocação de Salas – CT")
-
-    with st.spinner("Carregando dados..."):
+    st.title('🏫 Sistema de Alocação de Salas – CT')
+    with st.spinner('Carregando dados...'):
         df_salas, df_turmas = carregar_dados()
         salas_ct = criar_lista_salas(df_salas)
         todas_as_datas = gerar_datas(df_turmas)
         df_dados = processar_alocacoes(df_turmas, todas_as_datas, salas_ct)
 
-    st.success("✅ Dados carregados e processados com sucesso!")
+    st.success('✅ Dados carregados e processados com sucesso!')
     st.divider()
     interface_interativa(salas_ct, df_dados)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
