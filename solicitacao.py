@@ -360,11 +360,13 @@ def interface_interativa(salas_ct, df_processado):
     # ---------- Download Excel da sala ----------
     st.divider()
     if st.button("📥 Gerar Excel da Sala Selecionada", key="btn_excel_sala"):
+        
         wb = criar_workbook_horario_sala(sala_info)
-        buf = BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        st.download_button("Baixar Excel (Sala)", data=buf,
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        st.download_button("Baixar Excel (Sala)",
+                           data=buffer,
                            file_name=f"horario_{sala_escolhida}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
