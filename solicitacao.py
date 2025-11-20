@@ -289,89 +289,93 @@ def criar_workbook_horario_sala(sala_obj):
 # -----------------------
 def interface_interativa(salas_ct, df_processado):
     st.header("🎯 Solicitação de Sala")
-    evento = st.text_input("Digite o nome do evento:")
-    blocos = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
-    bloco_selecionado = st.selectbox("Selecione o bloco:", blocos)
-    salas_filtradas = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_selecionado)]
-    sala_escolhida = st.selectbox("Selecione a sala:", salas_filtradas)
-    data_escolhida = st.date_input("Selecione a data:")
-    data_fim_opcional = st.selectbox("Data final (opcional):", ["SIM","NÃO"])
-    if data_fim_opcional == "SIM":
-        data_fim_escolhida = st.date_input("Selecione a data:")
-    horario_inicio = st.time_input("Horário de início:")
-    horario_fim = st.time_input("Horário de término:")
 
+    # ---------- Dados da reserva ----------
+    evento        = st.text_input("Digite o nome do evento:")
+    blocos        = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
+    bloco_sel     = st.selectbox("Selecione o bloco:", blocos)
+    salas_filt    = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_sel)]
+    sala_escolhida= st.selectbox("Selecione a sala:", salas_filt)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        data_ini = st.date_input("Data inicial:", key="dt_ini")
+    with col2:
+        usa_fim  = st.selectbox("Data final (opcional):", ["NÃO","SIM"], key="sn_fim")
+    if usa_fim == "SIM":
+        data_fim = st.date_input("Data final:", key="dt_fim")
+    else:
+        data_fim = None
+
+    h_ini = st.time_input("Horário de início:",  key="h_ini")
+    h_fim = st.time_input("Horário de término:", key="h_fim")
+
+    # ---------- Sala escolhida ----------
     sala_info = next((s for s in salas_ct if s["NOME"] == sala_escolhida), None)
     if sala_info is None:
         st.error("Sala não encontrada.")
         return
 
+    # ---------- Horários ocupados (apenas visualização) ----------
     st.subheader("Horários ocupados (por dia)")
     for dia in DIAS_SEMANA:
         ocu = sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         st.write(f"**{dia}**: " + (", ".join([f"{a}-{b} ({c})" for a, b, c in ocu]) if ocu else "Nenhum"))
 
-        if st.button("📅 Solicitar Sala"):
-            inicio_str = horario_inicio.strftime("%H:%M")
-            fim_str = horario_fim.strftime("%H:%M")
-            dia_sem = data_escolhida.strftime("%A").upper()
-            mapping = {'MONDAY': 'SEGUNDA', 'TUESDAY': 'TERÇA', 'WEDNESDAY': 'QUARTA',
-                       'THURSDAY': 'QUINTA', 'FRIDAY': 'SEXTA', 'SATURDAY': 'SÁBADO', 'SUNDAY': 'DOMINGO'}
-            dia_sem = mapping.get(dia_sem, dia_sem)
-    
-            conflitos = []
-            for a, b, desc in sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia_sem, []):
-                if intervals_overlap(a, b, inicio_str, fim_str):
-                    conflitos.append((a, b, desc))
-    
-            if conflitos:
-                st.error("❌ A sala está ocupada: " + ", ".join([f"{a}-{b} ({c})" for a, b, c in conflitos]))
+    # ---------- Botão ÚNICO de solicitação ----------
+    if st.button("📅 Solicitar Sala", key="btn_solicitar"):
+        inicio_str = h_ini.strftime("%H:%M")
+        fim_str    = h_fim.strftime("%H:%M")
+        dia_sem    = data_ini.strftime("%A").upper()
+        mapping    = {'MONDAY':'SEGUNDA','TUESDAY':'TERÇA','WEDNESDAY':'QUARTA',
+                      'THURSDAY':'QUINTA','FRIDAY':'SEXTA','SATURDAY':'SÁBADO','SUNDAY':'DOMINGO'}
+        dia_port   = mapping.get(dia_sem, dia_sem)
+
+        # verifica conflitos
+        conflitos = [(a,b,d) for a,b,d in sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia_port,[])
+                     if intervals_overlap(a,b,inicio_str,fim_str)]
+        if conflitos:
+            st.error("❌ A sala está ocupada: " +
+                     ", ".join([f"{a}-{b} ({c})" for a,b,c in conflitos]))
+        else:
+            desc = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
+
+            # grava reserva(s)
+            if data_fim and usa_fim == "SIM":
+                cur = data_ini
+                while cur <= data_fim:
+                    d = mapping.get(cur.strftime("%A").upper(), cur.strftime("%A").upper())
+                    sala_info["RESERVAS"].append((cur, inicio_str, fim_str, desc))
+                    if d in DIAS_SEMANA:
+                        sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(d,[]).append((inicio_str,fim_str,desc))
+                        sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
+                    cur += dt.timedelta(days=1)
             else:
-                # usa o texto do evento se fornecido; caso contrário, rótulo padrão
-                descricao_reserva = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
-    
-                # registra reserva em memória e atualiza visão semanal
-                if 'data_fim_escolhida' in locals() and data_fim_opcional == "SIM" and data_fim_escolhida:
-                    # intervalo de datas (inclui data inicial e final)
-                    cur_date = data_escolhida
-                    while cur_date <= data_fim_escolhida:
-                        dia_cur = cur_date.strftime("%A").upper()
-                        dia_port = mapping.get(dia_cur, dia_cur)
-                        # adiciona à lista de reservas (persistência em memória)
-                        sala_info["RESERVAS"].append((cur_date, inicio_str, fim_str, descricao_reserva))
-                        # se for dia exibível na grade (segunda-sábado), adiciona à visão semanal
-                        if dia_port in DIAS_SEMANA:
-                            sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
-                                (inicio_str, fim_str, descricao_reserva)
-                            )
-                            sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-                        cur_date += dt.timedelta(days=1)
-                else:
-                    # reserva única
-                    sala_info["RESERVAS"].append((data_escolhida, inicio_str, fim_str, descricao_reserva))
-                    sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_sem, []).append(
-                        (inicio_str, fim_str, descricao_reserva)
-                    )
-                    sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-    
-                st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_escolhida} ({inicio_str} - {fim_str})")
+                sala_info["RESERVAS"].append((data_ini, inicio_str, fim_str, desc))
+                sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port,[]).append((inicio_str,fim_str,desc))
+                sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
 
+            st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_ini} ({inicio_str} - {fim_str})")
 
+    # ---------- Download Excel da sala ----------
     st.divider()
-    if st.button("📥 Gerar Excel da Sala Selecionada"):
+    if st.button("📥 Gerar Excel da Sala Selecionada", key="btn_excel_sala"):
         wb = criar_workbook_horario_sala(sala_info)
-        buffer = BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        st.download_button("Baixar Excel (Sala)", data=buffer, file_name=f"horario_{sala_escolhida}.xlsx",
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        st.download_button("Baixar Excel (Sala)", data=buf,
+                           file_name=f"horario_{sala_escolhida}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+    # ---------- Download geral ----------
     st.divider()
     st.subheader("Exportar dados processados (todas as turmas)")
-    buffer_df = BytesIO()
-    df_processado.to_excel(buffer_df, index=False)
-    buffer_df.seek(0)
-    st.download_button("📥 Baixar dados_disciplinas.xlsx", data=buffer_df, file_name="dados_disciplinas.xlsx",
+    buf_df = BytesIO()
+    df_processado.to_excel(buf_df, index=False)
+    buf_df.seek(0)
+    st.download_button("📥 Baixar dados_disciplinas.xlsx", data=buf_df,
+                       file_name="dados_disciplinas.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -----------------------
