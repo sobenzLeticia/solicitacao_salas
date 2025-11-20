@@ -155,7 +155,14 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
         fim_raw = aloc.get("HORARIO FINAL") or aloc.get("HORÁRIO FINAL") or aloc.get("HORARIO_FIM")
         inicio_t = str_to_time(inicio_raw)
         fim_t = str_to_time(fim_raw)
-        descricao = f"{aloc.get('CODIGO') or ''} - {aloc.get('DISCIPLINA') or ''} - {aloc.get('TURMA') or ''} - {aloc.get('PROFESSOR') or ''}\"
+                # descrição da alocação (segura contra escapes)
+        descricao = (
+            f"{aloc.get('CODIGO') or ''} - "
+            f"{aloc.get('DISCIPLINA') or ''} - "
+            f"{aloc.get('TURMA') or ''} - "
+            f"{aloc.get('PROFESSOR') or ''}"
+        )
+
         indices = [INDICE_DIAS[d] for d in dias_validos]
         datas = todas_as_datas[todas_as_datas.dayofweek.isin(indices)]
         registros.append({
@@ -174,6 +181,7 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
             "DATAS": datas,
             "DESCRICAO": descricao
         })
+
         sala_obj = next((s for s in salas_ct if s["NOME"] == sala), None)
         if sala_obj:
             for d in dias_validos:
@@ -303,7 +311,7 @@ def interface_interativa(salas_ct, df_processado):
         ocu = sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         st.write(f"**{dia}**: " + (", ".join([f"{a}-{b} ({c})" for a, b, c in ocu]) if ocu else "Nenhum"))
 
-    if st.button("📅 Solicitar Sala"):
+        if st.button("📅 Solicitar Sala"):
         inicio_str = horario_inicio.strftime("%H:%M")
         fim_str = horario_fim.strftime("%H:%M")
         dia_sem = data_escolhida.strftime("%A").upper()
@@ -319,10 +327,35 @@ def interface_interativa(salas_ct, df_processado):
         if conflitos:
             st.error("❌ A sala está ocupada: " + ", ".join([f"{a}-{b} ({c})" for a, b, c in conflitos]))
         else:
-            sala_info["RESERVAS"].append((data_escolhida, inicio_str, fim_str, "RESERVA_MANUAL"))
-            sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-            sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_sem, []).append((inicio_str, fim_str, "RESERVA_MANUAL"))
+            # usa o texto do evento se fornecido; caso contrário, rótulo padrão
+            descricao_reserva = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
+
+            # registra reserva em memória e atualiza visão semanal
+            if 'data_fim_escolhida' in locals() and data_fim_opcional == "SIM" and data_fim_escolhida:
+                # intervalo de datas (inclui data inicial e final)
+                cur_date = data_escolhida
+                while cur_date <= data_fim_escolhida:
+                    dia_cur = cur_date.strftime("%A").upper()
+                    dia_port = mapping.get(dia_cur, dia_cur)
+                    # adiciona à lista de reservas (persistência em memória)
+                    sala_info["RESERVAS"].append((cur_date, inicio_str, fim_str, descricao_reserva))
+                    # se for dia exibível na grade (segunda-sábado), adiciona à visão semanal
+                    if dia_port in DIAS_SEMANA:
+                        sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
+                            (inicio_str, fim_str, descricao_reserva)
+                        )
+                        sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
+                    cur_date += dt.timedelta(days=1)
+            else:
+                # reserva única
+                sala_info["RESERVAS"].append((data_escolhida, inicio_str, fim_str, descricao_reserva))
+                sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_sem, []).append(
+                    (inicio_str, fim_str, descricao_reserva)
+                )
+                sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
+
             st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_escolhida} ({inicio_str} - {fim_str})")
+
 
     st.divider()
     if st.button("📥 Gerar Excel da Sala Selecionada"):
