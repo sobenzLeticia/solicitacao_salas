@@ -309,8 +309,13 @@ def interface_interativa(salas_ct, df_processado):
         usa_fim  = st.selectbox("Data final (opcional):", ["NÃO","SIM"], key="sn_fim")
     if usa_fim == "SIM":
         data_fim = st.date_input("Data final:", key="dt_fim")
+        # >>> escolher dias da semana <<<
+        dias_evento = st.multiselect("Dias da semana que o evento ocorrerá:",
+                                     DIAS_SEMANA,
+                                     default=["SEGUNDA"])
     else:
-        data_fim = None
+        data_fim  = None
+        dias_evento = None
 
     h_ini = st.time_input("Horário de início:",  key="h_ini")
     h_fim = st.time_input("Horário de término:", key="h_fim")
@@ -331,38 +336,46 @@ def interface_interativa(salas_ct, df_processado):
     if st.button("📅 Solicitar Sala", key="btn_solicitar"):
         inicio_str = h_ini.strftime("%H:%M")
         fim_str    = h_fim.strftime("%H:%M")
-        dia_sem    = data_ini.strftime("%A").upper()
         mapping    = {'MONDAY':'SEGUNDA','TUESDAY':'TERÇA','WEDNESDAY':'QUARTA',
                       'THURSDAY':'QUINTA','FRIDAY':'SEXTA','SATURDAY':'SÁBADO','SUNDAY':'DOMINGO'}
-        dia_port   = mapping.get(dia_sem, dia_sem)
 
-        # verifica conflitos
-        conflitos = [(a,b,d) for a,b,d in sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia_port,[])
-                     if intervals_overlap(a,b,inicio_str,fim_str)]
+        # ---------- gera lista de datas que serão verificadas ----------
+        if usa_fim == "SIM" and data_fim and dias_evento:
+            # intervalo + filtro de dias da semana
+            todas_as_datas_evento = pd.date_range(data_ini, data_fim, freq='D') \
+                                      .to_series() \
+                                      .map(lambda d: mapping.get(d.strftime("%A").upper(),
+                                                                 d.strftime("%A").upper())) \
+                                      .isin(dias_evento)
+            datas_a_verificar = pd.date_range(data_ini, data_fim, freq='D')[todas_as_datas_evento]
+        else:
+            # reserva única
+            datas_a_verificar = [data_ini]
+
+        # ---------- verifica conflito em CADA data/horário ----------
+        conflitos = []
+        for data in datas_a_verificar:
+            dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
+            for a, b, desc in sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia_port, []):
+                if intervals_overlap(a, b, inicio_str, fim_str):
+                    conflitos.append((data.strftime("%d/%m"), a, b, desc))
+
         if conflitos:
-            st.error("❌ A sala está ocupada: " +
-                     ", ".join([f"{a}-{b} ({c})" for a,b,c in conflitos]))
+            st.error("❌ Conflitos encontrados:\n" +
+                     "\n".join([f"{dt} {a}-{b} ({d})" for dt, a, b, d in conflitos]))
         else:
             desc = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
 
-            # grava reserva(s)
-            if data_fim and usa_fim == "SIM":
-                cur = data_ini
-                while cur <= data_fim:
-                    d = mapping.get(cur.strftime("%A").upper(), cur.strftime("%A").upper())
-                    sala_info["RESERVAS"].append((cur, inicio_str, fim_str, desc))
-                    if d in DIAS_SEMANA:
-                        sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(d,[]).append((inicio_str,fim_str,desc))
-                        sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-                    cur += dt.timedelta(days=1)
-            else:
-                sala_info["RESERVAS"].append((data_ini, inicio_str, fim_str, desc))
-                sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port,[]).append((inicio_str,fim_str,desc))
+            # ---------- grava todas as datas livres ----------
+            for data in datas_a_verificar:
+                dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
+                sala_info["RESERVAS"].append((data, inicio_str, fim_str, desc))
+                sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
+                    (inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
 
-            st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_ini} ({inicio_str} - {fim_str})")
-            # que a tela será recarregada com os novos dados
-            
+            st.success(f"✅ Evento registrado em {len(datas_a_verificar)} dia(s).")
+                        
     
     # ---------- Download Excel da sala ----------
     st.divider()
