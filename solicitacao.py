@@ -155,7 +155,7 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
         fim_raw = aloc.get("HORARIO FINAL") or aloc.get("HORÁRIO FINAL") or aloc.get("HORARIO_FIM")
         inicio_t = str_to_time(inicio_raw)
         fim_t = str_to_time(fim_raw)
-        descricao = f\"{aloc.get('CODIGO') or ''} - {aloc.get('DISCIPLINA') or ''} - {aloc.get('TURMA') or ''} - {aloc.get('PROFESSOR') or ''}\"
+        descricao = f"{aloc.get('CODIGO') or ''} - {aloc.get('DISCIPLINA') or ''} - {aloc.get('TURMA') or ''} - {aloc.get('PROFESSOR') or ''}\"
         indices = [INDICE_DIAS[d] for d in dias_validos]
         datas = todas_as_datas[todas_as_datas.dayofweek.isin(indices)]
         registros.append({
@@ -281,11 +281,15 @@ def criar_workbook_horario_sala(sala_obj):
 # -----------------------
 def interface_interativa(salas_ct, df_processado):
     st.header("🎯 Solicitação de Sala")
+    evento = st.text_input("Digite o nome do evento:")
     blocos = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
     bloco_selecionado = st.selectbox("Selecione o bloco:", blocos)
     salas_filtradas = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_selecionado)]
     sala_escolhida = st.selectbox("Selecione a sala:", salas_filtradas)
     data_escolhida = st.date_input("Selecione a data:")
+    data_fim_opcional = st.selectbox("Data final (opcional):", ["SIM","NÃO"])
+    if data_fim_opcional == "SIM":
+        data_fim_escolhida = st.date_input("Selecione a data:")
     horario_inicio = st.time_input("Horário de início:")
     horario_fim = st.time_input("Horário de término:")
 
