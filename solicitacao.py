@@ -212,6 +212,7 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
 # Cria workbook por sala
 # -----------------------
 def criar_workbook_horario_sala(sala_obj):
+    wb = Workbook()
     horas_minutos = []
     for h in range(7, 22):
         horas_minutos.append(f"{h:02d}:00 - {h:02d}:30")
@@ -282,6 +283,10 @@ def criar_workbook_horario_sala(sala_obj):
     for col in range(1, len(dias)+2):
         ws.column_dimensions[get_column_letter(col)].width = 25
 
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
     return wb
 
 # -----------------------
@@ -358,19 +363,14 @@ def interface_interativa(salas_ct, df_processado):
             st.success(f"✅ Solicitação registrada para {sala_escolhida} em {data_ini} ({inicio_str} - {fim_str})")
             # que a tela será recarregada com os novos dados
             st.rerun()
-
+    
     # ---------- Download Excel da sala ----------
     st.divider()
-    if st.button("📥 Gerar Excel da Sala Selecionada", key="btn_excel_sala"):
-        
-        wb = criar_workbook_horario_sala(sala_info)
-        buffer = BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        st.download_button("Baixar Excel (Sala)",
-                           data=buffer,
-                           file_name=f"horario_{sala_escolhida}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    if st.download_button("📥 Baixar Excel (Sala)",
+                      data=criar_workbook_horario_sala(sala_info),
+                      file_name=f"horario_{sala_escolhida}.xlsx",
+                      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+        pass   # só para manter a lógica do if
 
     # ---------- Download geral ----------
     st.divider()
