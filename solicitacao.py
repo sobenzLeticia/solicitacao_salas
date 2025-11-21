@@ -268,8 +268,8 @@ def criar_workbook_horario_sala(sala_obj):
                             # verifica se existe data diferente (intervalo)
                             datas_reserva = [d for d, i, f, dscr in sala_obj["RESERVAS"]
                                              if i == inicio and f == fim and dscr == desc]
-                            if len({d for d, _, _, _ in datas_reserva}) > 1:
-                                data_fim_fmt = max(datas_reserva).strftime("%d/%m")
+                            if len({t[0] for t in datas_reserva}) > 1:
+                                data_fim_fmt = max(d[0] for d in datas_reserva).strftime("%d/%m")
                                 texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
                             else:
                                 texto_celula = desc
