@@ -218,25 +218,21 @@ def criar_workbook_horario_sala(sala_obj):
     # ---------- preenche disciplinas + reservas ----------
     for col, dia in enumerate(dias, start=2):
         ocupados = sala_obj["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
-        for inicio, fim, desc in ocupados:
-            t_start = str_to_time(inicio)
-            t_end = str_to_time(fim)
-            if not t_start or not t_end:
-                continue
-            cur = dt.datetime.combine(dt.date.today(), t_start)
-            fim_dt = dt.datetime.combine(dt.date.today(), t_end)
-            while cur < fim_dt:
-                nxt = cur + dt.timedelta(minutes=30)
-                label = f"{cur.time().strftime('%H:%M')} - {nxt.time().strftime('%H:%M')}"
-                try:
-                    row_idx = horas_minutos.index(label) + 3
-                except ValueError:
-                    cur = nxt
+        # agrupa por descrição para montar o texto uma única vez
+        from collections import defaultdict
+        grp = defaultdict(list)
+        for ini, fim, desc in ocupados:
+            grp[desc].append((ini, fim))
+
+        for desc, intervalos in grp.items():
+            for inicio, fim in intervalos:
+                t_start = str_to_time(inicio)
+                t_end   = str_to_time(fim)
+                if not t_start or not t_end:
                     continue
 
-                # ---------- monta texto da célula ----------
+                # ---------- texto completo, UMA vez ----------
                 if desc.startswith("RESERVA_MANUAL"):
-                    # busca todas as datas desta mesma reserva (mesmo horário)
                     datas_reserva = {r_data for r_data, r_ini, r_fim, r_desc in sala_obj["RESERVAS"]
                                      if r_ini == inicio and r_fim == fim and r_desc == desc}
                     if len(datas_reserva) > 1:
@@ -244,13 +240,22 @@ def criar_workbook_horario_sala(sala_obj):
                         data_fim_fmt = max(datas_reserva).strftime("%d/%m")
                         texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
                     else:
-                        data_ini_fmt = min(datas_reserva).strftime("%d/%m")
-                        texto_celula = f"{desc} – {data_ini_fmt}"
+                        texto_celula = f"{desc} – {min(datas_reserva).strftime('%d/%m')}"
                 else:
                     texto_celula = desc
 
-                ws.cell(row=row_idx, column=col, value=texto_celula)
-                cur = nxt
+                # ----- escreve SOMENTE no slot inicial -----
+                label_ini = f"{t_start.strftime('%H:%M')} – {(dt.datetime.combine(dt.date.today(), t_start) + dt.timedelta(minutes=30)).strftime('%H:%M')}"
+                try:
+                    row_idx = horas_minutos.index(label_ini) + 3
+                    ws.cell(row=row_idx, column=col, value=texto_celula)
+                except ValueError:
+                    pass
+                # ----- avança o loop sem reescrever -----
+                cur = dt.datetime.combine(dt.date.today(), t_start)
+                fim_dt = dt.datetime.combine(dt.date.today(), t_end)
+                while cur < fim_dt:
+                    cur += dt.timedelta(minutes=30)
 
     # ---------- mescla células iguais ----------
     for col in range(2, len(dias) + 2):
