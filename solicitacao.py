@@ -313,6 +313,7 @@ def criar_workbook_horario_sala(sala_obj):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+    return wb
 
 
 # -----------------------
