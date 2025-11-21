@@ -212,7 +212,6 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
 # Cria workbook por sala
 # -----------------------
 def criar_workbook_horario_sala(sala_obj):
-    wb = Workbook()
     horas_minutos = []
     for h in range(7, 22):
         horas_minutos.append(f"{h:02d}:00 - {h:02d}:30")
@@ -236,12 +235,12 @@ def criar_workbook_horario_sala(sala_obj):
     for row, hora in enumerate(horas_minutos, start=3):
         ws.cell(row=row, column=1, value=hora)
 
-    # preencher
+    # ---------- preenche disciplinas + reservas ----------
     for col, dia in enumerate(dias, start=2):
         ocupados = sala_obj["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         for inicio, fim, desc in ocupados:
             t_start = str_to_time(inicio)
-            t_end = str_to_time(fim)
+            t_end   = str_to_time(fim)
             if not t_start or not t_end:
                 continue
             cur = dt.datetime.combine(dt.date.today(), t_start)
@@ -251,12 +250,39 @@ def criar_workbook_horario_sala(sala_obj):
                 label = f"{cur.time().strftime('%H:%M')} - {nxt.time().strftime('%H:%M')}"
                 try:
                     row_idx = horas_minutos.index(label) + 3
-                    ws.cell(row=row_idx, column=col, value=desc)
                 except ValueError:
-                    pass
+                    cur = nxt
+                    continue
+
+                # ---------- monta texto da célula ----------
+                # desc já está no formato "EVENTO" ou "CÓDIGO - DISCIPLINA - TURMA - PROFESSOR"
+                # Se for uma reserva manual, procuramos a data correspondente
+                if desc.startswith("RESERVA_MANUAL") or desc == desc.strip():
+                    # procuramos a reserva que tem esse horário para pegar as datas
+                    for r in sala_obj["RESERVAS"]:
+                        r_data, r_ini, r_fim, r_desc = r
+                        if r_ini == inicio and r_fim == fim and r_desc == desc:
+                            if r_data != r_data:          # comparar só o dia
+                                continue
+                            data_ini_fmt = r_data.strftime("%d/%m")
+                            # verifica se existe data diferente (intervalo)
+                            datas_reserva = [d for d, i, f, dscr in sala_obj["RESERVAS"]
+                                             if i == inicio and f == fim and dscr == desc]
+                            if len({d for d, _, _, _ in datas_reserva}) > 1:
+                                data_fim_fmt = max(datas_reserva).strftime("%d/%m")
+                                texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
+                            else:
+                                texto_celula = desc
+                            break
+                    else:
+                        texto_celula = desc
+                else:
+                    texto_celula = desc
+
+                ws.cell(row=row_idx, column=col, value=texto_celula)
                 cur = nxt
 
-    # mesclar blocos iguais verticalmente
+    # ---------- mescla células iguais ----------
     for col in range(2, len(dias) + 2):
         start_row = 3
         cur_val = ws.cell(row=3, column=col).value
@@ -270,7 +296,7 @@ def criar_workbook_horario_sala(sala_obj):
         if cur_val not in (None, "") and start_row <= len(horas_minutos) + 2:
             ws.merge_cells(start_row=start_row, start_column=col, end_row=len(horas_minutos) + 2, end_column=col)
 
-    # estilo
+    # ---------- estilo ----------
     thin = Side(style="thin")
     borda = Border(left=thin, right=thin, top=thin, bottom=thin)
     align = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -287,7 +313,7 @@ def criar_workbook_horario_sala(sala_obj):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
-    return wb
+
 
 # -----------------------
 # Interface Streamlit
