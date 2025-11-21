@@ -8,9 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Side, Font
 from openpyxl.utils import get_column_letter
 
-# -----------------------
-# Configurações
-# -----------------------
+# -----------------------  Configurações  -----------------------
 BASE_DIR = Path(__file__).parent
 CAMINHO_SALAS = BASE_DIR / "SALAS - COPIA.xlsx"
 CAMINHO_DISCIPLINAS = BASE_DIR / "Resultados_Gerais.xlsx"
@@ -20,22 +18,18 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
 INDICE_DIAS = {d: i for i, d in enumerate(DIAS_SEMANA)}
 
-# -----------------------
-# Utils horário
-# -----------------------
+# -----------------------  Utils horário  -----------------------
 def str_to_time(s):
     if s is None or (isinstance(s, float) and pd.isna(s)):
         return None
     if isinstance(s, dt.time):
         return s
     s = str(s).strip()
-    # tenta formatos comuns
     for fmt in ("%H:%M:%S", "%H:%M", "%H.%M"):
         try:
             return dt.datetime.strptime(s, fmt).time()
         except Exception:
             pass
-    # tentar extrair dígitos
     s2 = re.sub(r'[^0-9:]', '', s)
     try:
         return dt.datetime.strptime(s2, "%H:%M").time()
@@ -60,7 +54,6 @@ def intervals_overlap(a_start, a_end, b_start, b_end):
     return max(a_s, b_s) < min(a_e, b_e)
 
 def gerar_intervalos(inicio: dt.time, fim: dt.time, passo: dt.timedelta):
-    """Gera lista de dt.time de inicio até fim (exclusivo fim) com passo."""
     if inicio is None or fim is None:
         return []
     cur = dt.datetime.combine(dt.date.today(), inicio)
@@ -80,12 +73,9 @@ def exportar_dados(df: pd.DataFrame):
     buffer.seek(0)
     return buffer, caminho
 
-# -----------------------
-# Leitura e processamento
-# -----------------------
+# -----------------------  Leitura e processamento  -----------------------
 @st.cache_data(show_spinner=False)
 def carregar_dados():
-    """Carrega os dados de salas e turmas do repositório."""
     if not CAMINHO_SALAS.exists():
         st.error(f"❌ Arquivo de salas não encontrado em: {CAMINHO_SALAS}")
         st.stop()
@@ -105,11 +95,8 @@ def criar_lista_salas(df_salas: pd.DataFrame):
             "NOME": nome,
             "CAPACIDADE": capacidade,
             "DATAS": set(),
-            # HORARIOS_OCUPADOS armazena strings 'HH:MM - HH:MM'
             "HORARIOS_OCUPADOS": set(),
-            # HORARIOS_OCUPADOS_SEMANA: dict dia -> list de (inicio_str, fim_str, descricao)
             "HORARIOS_OCUPADOS_SEMANA": {d: [] for d in DIAS_SEMANA},
-            # RESERVAS manuais (data, inicio_str, fim_str, descricao)
             "RESERVAS": []
         })
     return salas
@@ -119,13 +106,11 @@ def re_split_days(s: str):
     return [p for p in parts if p]
 
 def gerar_datas(df_turmas):
-    # tenta extrair colunas 13/14 como antes, com fallback
     try:
         data_inicio = list(map(int, str(df_turmas.iloc[0, 13]).split(",")))
         data_final = list(map(int, str(df_turmas.iloc[0, 14]).split(",")))
         return pd.date_range(dt.date(*data_inicio), dt.date(*data_final))
     except Exception:
-        # fallback simples: usa min/max da primeira coluna interpretada como data
         try:
             col0 = df_turmas.columns[0]
             min_date = pd.to_datetime(df_turmas[col0]).min().date()
@@ -155,7 +140,6 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
         fim_raw = aloc.get("HORARIO FINAL") or aloc.get("HORÁRIO FINAL") or aloc.get("HORARIO_FIM")
         inicio_t = str_to_time(inicio_raw)
         fim_t = str_to_time(fim_raw)
-                # descrição da alocação (segura contra escapes)
         descricao = (
             f"{aloc.get('CODIGO') or ''} - "
             f"{aloc.get('DISCIPLINA') or ''} - "
@@ -185,14 +169,12 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
         sala_obj = next((s for s in salas_ct if s["NOME"] == sala), None)
         if sala_obj:
             for d in dias_validos:
-                # se há início/fim válidos, adiciona intervalos por dia
                 if inicio_t and fim_t:
                     sala_obj["HORARIOS_OCUPADOS_SEMANA"][d].append((
                         inicio_t.strftime("%H:%M"), fim_t.strftime("%H:%M"), descricao
                     ))
                     sala_obj["HORARIOS_OCUPADOS"].add(f"{inicio_t.strftime('%H:%M')} - {fim_t.strftime('%H:%M')}")
                 else:
-                    # tenta extrair da coluna HORARIOS_RAW (ex: 'SEGUNDA 07:00-08:00, TERÇA 09:00-10:00')
                     raw = str(aloc.get("HORARIO") or "")
                     blocos = [b.strip() for b in raw.split(",") if b.strip()]
                     for bloco in blocos:
@@ -208,9 +190,7 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
                             continue
     return pd.DataFrame(registros)
 
-# -----------------------
-# Cria workbook por sala
-# -----------------------
+# -----------------------  Cria workbook por sala  -----------------------
 def criar_workbook_horario_sala(sala_obj):
     horas_minutos = []
     for h in range(7, 22):
@@ -240,7 +220,7 @@ def criar_workbook_horario_sala(sala_obj):
         ocupados = sala_obj["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         for inicio, fim, desc in ocupados:
             t_start = str_to_time(inicio)
-            t_end   = str_to_time(fim)
+            t_end = str_to_time(fim)
             if not t_start or not t_end:
                 continue
             cur = dt.datetime.combine(dt.date.today(), t_start)
@@ -255,27 +235,17 @@ def criar_workbook_horario_sala(sala_obj):
                     continue
 
                 # ---------- monta texto da célula ----------
-                # desc já está no formato "EVENTO" ou "CÓDIGO - DISCIPLINA - TURMA - PROFESSOR"
-                # Se for uma reserva manual, procuramos a data correspondente
-                if desc.startswith("RESERVA_MANUAL") or desc == desc.strip():
-                    # procuramos a reserva que tem esse horário para pegar as datas
-                    for r in sala_obj["RESERVAS"]:
-                        r_data, r_ini, r_fim, r_desc = r
-                        if r_ini == inicio and r_fim == fim and r_desc == desc:
-                            if r_data != r_data:          # comparar só o dia
-                                continue
-                            data_ini_fmt = r_data.strftime("%d/%m")
-                            # verifica se existe data diferente (intervalo)
-                            datas_reserva = [d for d, i, f, dscr in sala_obj["RESERVAS"]
-                                             if i == inicio and f == fim and dscr == desc]
-                            if len({t[0] for t in datas_reserva}) > 1:
-                                data_fim_fmt = max(d[0] for d in datas_reserva).strftime("%d/%m")
-                                texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
-                            else:
-                                texto_celula = desc
-                            break
+                if desc.startswith("RESERVA_MANUAL"):
+                    # busca todas as datas desta mesma reserva (mesmo horário)
+                    datas_reserva = {r_data for r_data, r_ini, r_fim, r_desc in sala_obj["RESERVAS"]
+                                     if r_ini == inicio and r_fim == fim and r_desc == desc}
+                    if len(datas_reserva) > 1:
+                        data_ini_fmt = min(datas_reserva).strftime("%d/%m")
+                        data_fim_fmt = max(datas_reserva).strftime("%d/%m")
+                        texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
                     else:
-                        texto_celula = desc
+                        data_ini_fmt = min(datas_reserva).strftime("%d/%m")
+                        texto_celula = f"{desc} – {data_ini_fmt}"
                 else:
                     texto_celula = desc
 
@@ -313,73 +283,59 @@ def criar_workbook_horario_sala(sala_obj):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
-    return wb
 
-
-# -----------------------
-# Interface Streamlit
-# -----------------------
+# -----------------------  Interface Streamlit  -----------------------
 def interface_interativa(salas_ct, df_processado):
     st.header("🎯 Solicitação de Sala")
 
-    # ---------- Dados da reserva ----------
-    evento        = st.text_input("Digite o nome do evento:")
-    blocos        = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
-    bloco_sel     = st.selectbox("Selecione o bloco:", blocos)
-    salas_filt    = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_sel)]
-    sala_escolhida= st.selectbox("Selecione a sala:", salas_filt)
+    evento = st.text_input("Digite o nome do evento:")
+    blocos = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
+    bloco_sel = st.selectbox("Selecione o bloco:", blocos)
+    salas_filt = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_sel)]
+    sala_escolhida = st.selectbox("Selecione a sala:", salas_filt)
 
     col1, col2 = st.columns(2)
     with col1:
         data_ini = st.date_input("Data inicial:", key="dt_ini")
     with col2:
-        usa_fim  = st.selectbox("Data final (opcional):", ["NÃO","SIM"], key="sn_fim")
+        usa_fim = st.selectbox("Data final (opcional):", ["NÃO", "SIM"], key="sn_fim")
+
+    dias_evento = None
     if usa_fim == "SIM":
         data_fim = st.date_input("Data final:", key="dt_fim")
-        # >>> escolher dias da semana <<<
-        dias_evento = st.multiselect("Dias da semana que o evento ocorrerá:",
-                                     DIAS_SEMANA,
-                                     default=["SEGUNDA"])
+        dias_evento = st.multiselect("Dias da semana que o evento ocorrerá:", DIAS_SEMANA, default=["SEGUNDA"])
     else:
-        data_fim  = None
-        dias_evento = None
+        data_fim = None
 
-    h_ini = st.time_input("Horário de início:",  key="h_ini")
+    h_ini = st.time_input("Horário de início:", key="h_ini")
     h_fim = st.time_input("Horário de término:", key="h_fim")
 
-    # ---------- Sala escolhida ----------
     sala_info = next((s for s in salas_ct if s["NOME"] == sala_escolhida), None)
     if sala_info is None:
         st.error("Sala não encontrada.")
         return
 
-    # ---------- Horários ocupados (apenas visualização) ----------
     st.subheader("Horários ocupados (por dia)")
     for dia in DIAS_SEMANA:
         ocu = sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         st.write(f"**{dia}**: " + (", ".join([f"{a}-{b} ({c})" for a, b, c in ocu]) if ocu else "Nenhum"))
 
-    # ---------- Botão ÚNICO de solicitação ----------
     if st.button("📅 Solicitar Sala", key="btn_solicitar"):
         inicio_str = h_ini.strftime("%H:%M")
-        fim_str    = h_fim.strftime("%H:%M")
-        mapping    = {'MONDAY':'SEGUNDA','TUESDAY':'TERÇA','WEDNESDAY':'QUARTA',
-                      'THURSDAY':'QUINTA','FRIDAY':'SEXTA','SATURDAY':'SÁBADO','SUNDAY':'DOMINGO'}
+        fim_str = h_fim.strftime("%H:%M")
+        mapping = {'MONDAY': 'SEGUNDA', 'TUESDAY': 'TERÇA', 'WEDNESDAY': 'QUARTA',
+                   'THURSDAY': 'QUINTA', 'FRIDAY': 'SEXTA', 'SATURDAY': 'SÁBADO', 'SUNDAY': 'DOMINGO'}
 
-        # ---------- gera lista de datas que serão verificadas ----------
         if usa_fim == "SIM" and data_fim and dias_evento:
-            # intervalo + filtro de dias da semana
-            todas_as_datas_evento = pd.date_range(data_ini, data_fim, freq='D') \
-                                      .to_series() \
-                                      .map(lambda d: mapping.get(d.strftime("%A").upper(),
-                                                                 d.strftime("%A").upper())) \
-                                      .isin(dias_evento)
-            datas_a_verificar = pd.date_range(data_ini, data_fim, freq='D')[todas_as_datas_evento]
+            datas_a_verificar = pd.date_range(data_ini, data_fim, freq='D') \
+                                .to_series() \
+                                .map(lambda d: mapping.get(d.strftime("%A").upper(),
+                                                           d.strftime("%A").upper())) \
+                                .isin(dias_evento)
+            datas_a_verificar = pd.date_range(data_ini, data_fim, freq='D')[datas_a_verificar]
         else:
-            # reserva única
             datas_a_verificar = [data_ini]
 
-        # ---------- verifica conflito em CADA data/horário ----------
         conflitos = []
         for data in datas_a_verificar:
             dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
@@ -392,27 +348,21 @@ def interface_interativa(salas_ct, df_processado):
                      "\n".join([f"{dt} {a}-{b} ({d})" for dt, a, b, d in conflitos]))
         else:
             desc = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
-
-            # ---------- grava todas as datas livres ----------
             for data in datas_a_verificar:
                 dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
                 sala_info["RESERVAS"].append((data, inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
                     (inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-
             st.success(f"✅ Evento registrado em {len(datas_a_verificar)} dia(s).")
-                        
-    
-    # ---------- Download Excel da sala ----------
+
     st.divider()
     if st.download_button("📥 Baixar Excel (Sala)",
-                      data=criar_workbook_horario_sala(sala_info),
-                      file_name=f"horario_{sala_escolhida}.xlsx",
-                      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
-        pass   # só para manter a lógica do if
+                          data=criar_workbook_horario_sala(sala_info),
+                          file_name=f"horario_{sala_escolhida}.xlsx",
+                          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+        pass
 
-    # ---------- Download geral ----------
     st.divider()
     st.subheader("Exportar dados processados (todas as turmas)")
     buf_df = BytesIO()
@@ -422,9 +372,7 @@ def interface_interativa(salas_ct, df_processado):
                        file_name="dados_disciplinas.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# -----------------------
-# Main
-# -----------------------
+# -----------------------  Main  -----------------------
 def main():
     st.title("🏫 Sistema de Alocação de Salas – CT")
     with st.spinner("Carregando dados..."):
