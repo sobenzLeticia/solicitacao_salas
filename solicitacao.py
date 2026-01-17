@@ -289,6 +289,23 @@ def interface_interativa(salas_ct, df_processado):
     st.header("🎯 Solicitação de Sala")
 
     evento = st.text_input("Digite o nome do evento:")
+    nome = st.text_input("Digite seu nome:")
+    remetente = st.text_input("Digite seu email:")
+    destinatario = "reservasalact@ufc.br"
+    assunto = "Teste - Solicitaçao de Salas"
+    corpo_do_email = """Olá,
+        Este email éum teste a solicitação de salas,
+        Atenciosamente
+    """
+    # Criar a mensagem
+    msg = MIMEMultipart()
+    msg['From'] = remetente
+    msg['To'] = destinatario
+    msg['Subject'] = assunto
+    msg.attach(MIMEText(corpo_do_email, 'plain'))
+    servidor_smtp = "smtp.gmail.com"
+    porta_smtp = 465
+    
     blocos = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
     bloco_sel = st.selectbox("Selecione o bloco:", blocos)
     salas_filt = [s["NOME"] for s in salas_ct if s["NOME"].startswith(bloco_sel)]
@@ -354,6 +371,15 @@ def interface_interativa(salas_ct, df_processado):
                 sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
                     (inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
+                # Conecta ao servidor SMTP de forma segura (SSL)
+                server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
+                server.login(remetente, senha_app)
+            
+                # Envia o e-mail
+                texto = msg.as_string()
+                server.sendmail(remetente, destinatario, texto)
+                server.quit()
+                print("E-mail enviado com sucesso!")
             st.success(f"✅ Evento registrado em {len(datas_a_verificar)} dia(s).")
 
     st.divider()
