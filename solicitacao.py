@@ -376,7 +376,7 @@ def interface_interativa(salas_ct, df_processado):
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
                 # Conecta ao servidor SMTP de forma segura (SSL)
                 server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
-                server.login(remetente, senha_app)
+                server.login(remetente)
             
                 # Envia o e-mail
                 texto = msg.as_string()
