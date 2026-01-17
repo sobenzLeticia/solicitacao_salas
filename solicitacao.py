@@ -7,6 +7,9 @@ import streamlit as st
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Side, Font
 from openpyxl.utils import get_column_letter
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # -----------------------  Configurações  -----------------------
 BASE_DIR = Path(__file__).parent
