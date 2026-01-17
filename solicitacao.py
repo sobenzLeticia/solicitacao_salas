@@ -294,7 +294,7 @@ def interface_interativa(salas_ct, df_processado):
     evento = st.text_input("Digite o nome do evento:")
     nome = st.text_input("Digite seu nome:")
     email_cliente = st.text_input("Digite seu email:")
-    remetente = "solicitacaosalas@gmail.com"
+    remetente = "solicitacaosalasct@gmail.com"
     destinatario = "reservasalact@ufc.br"
     assunto = "Teste - Solicitaçao de Salas"
     corpo_do_email = f"""Olá,
@@ -302,7 +302,7 @@ def interface_interativa(salas_ct, df_processado):
         Se puder, envie um email a {email_cliente} confirmando receber
         Atenciosamente
     """
-    senha = "solicitacaosalas27082025"
+    senha = "solicitacaosalasct27082025"
     # Criar a mensagem
     msg = MIMEMultipart()
     msg['From'] = remetente
