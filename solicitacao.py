@@ -302,7 +302,7 @@ def interface_interativa(salas_ct, df_processado):
         Se puder, envie um email a {email_cliente} confirmando receber
         Atenciosamente
     """
-    senha = "solicitacaosalasct27082025"
+    senha = "rmqz ohnf oppx zpwo"
     # Criar a mensagem
     msg = MIMEMultipart()
     msg['From'] = remetente
