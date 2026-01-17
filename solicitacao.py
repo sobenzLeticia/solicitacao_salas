@@ -293,13 +293,16 @@ def interface_interativa(salas_ct, df_processado):
 
     evento = st.text_input("Digite o nome do evento:")
     nome = st.text_input("Digite seu nome:")
-    remetente = st.text_input("Digite seu email:")
+    email_cliente = st.text_input("Digite seu email:")
+    remetente = "solicitacaosalas@gmail.com"
     destinatario = "reservasalact@ufc.br"
     assunto = "Teste - Solicitaçao de Salas"
-    corpo_do_email = """Olá,
+    corpo_do_email = f"""Olá,
         Este email éum teste a solicitação de salas,
+        Se puder, envie um email a {email_cliente} confirmando receber
         Atenciosamente
     """
+    senha = "solicitacaosalas27082025"
     # Criar a mensagem
     msg = MIMEMultipart()
     msg['From'] = remetente
@@ -376,7 +379,7 @@ def interface_interativa(salas_ct, df_processado):
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
                 # Conecta ao servidor SMTP de forma segura (SSL)
                 server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
-                server.login(remetente)
+                server.login(remetente, senha)
             
                 # Envia o e-mail
                 texto = msg.as_string()
