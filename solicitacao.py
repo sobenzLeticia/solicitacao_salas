@@ -299,14 +299,6 @@ def interface_interativa(salas_ct, df_processado):
     assunto = "Teste - Solicitaçao de Salas"
     
     senha = "rmqz ohnf oppx zpwo"
-    # Criar a mensagem
-    msg = MIMEMultipart()
-    msg['From'] = remetente
-    msg['To'] = destinatario
-    msg['Subject'] = assunto
-    msg.attach(MIMEText(corpo_do_email, 'plain'))
-    servidor_smtp = "smtp.gmail.com"
-    porta_smtp = 465
     
     blocos = sorted({s["NOME"][:3] for s in salas_ct if s["NOME"]})
     bloco_sel = st.selectbox("Selecione o bloco:", blocos)
@@ -382,7 +374,14 @@ def interface_interativa(salas_ct, df_processado):
                 Atenciosamente,
                 {nome}
                 """
-            
+                # Criar a mensagem
+                msg = MIMEMultipart()
+                msg['From'] = remetente
+                msg['To'] = destinatario
+                msg['Subject'] = assunto
+                msg.attach(MIMEText(corpo_do_email, 'plain'))
+                servidor_smtp = "smtp.gmail.com"
+                porta_smtp = 465
                 # Envia o e-mail
                 texto = msg.as_string()
                 server.sendmail(remetente, destinatario, texto)
