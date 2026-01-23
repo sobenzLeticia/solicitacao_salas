@@ -368,6 +368,7 @@ def interface_interativa(salas_ct, df_processado):
                 #corpo email
                 corpo_do_email = f"""Olá,
                 Solicito sala {sala_escolhida} - {data_ini} - {data_fim} - {h_ini}:{h_fim}
+                Enviar email resposta ao endereço: {email_cliente}
                 Atenciosamente,
                 {nome}
                 """
