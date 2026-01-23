@@ -365,9 +365,6 @@ def interface_interativa(salas_ct, df_processado):
                 sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
                     (inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-                # Conecta ao servidor SMTP de forma segura (SSL)
-                server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
-                server.login(remetente, senha)
                 #corpo email
                 corpo_do_email = f"""Olá,
                 Solicito sala {sala_escolhida} - {data_ini} - {data_fim} - {h_ini}:{h_fim}
@@ -382,6 +379,11 @@ def interface_interativa(salas_ct, df_processado):
                 msg.attach(MIMEText(corpo_do_email, 'plain'))
                 servidor_smtp = "smtp.gmail.com"
                 porta_smtp = 465
+                
+                # Conecta ao servidor SMTP de forma segura (SSL)
+                server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
+                server.login(remetente, senha)
+                
                 # Envia o e-mail
                 texto = msg.as_string()
                 server.sendmail(remetente, destinatario, texto)
