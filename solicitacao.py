@@ -5,7 +5,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Side, Font
+from openpyxl.styles import Alignment, Border, Side, Font, PatternFill
 from openpyxl.utils import get_column_letter
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -13,10 +13,9 @@ from email.mime.text import MIMEText
 
 # -----------------------  Configurações  -----------------------
 BASE_DIR = Path(__file__).parent
-CAMINHO_SALAS = BASE_DIR / "SALAS - COPIA.xlsx"
-CAMINHO_DISCIPLINAS = BASE_DIR / "Resultados_Gerais.xlsx"
-OUTPUT_DIR = BASE_DIR / "resultados"
-OUTPUT_DIR.mkdir(exist_ok=True)
+CAMINHO_SALAS = r"C:\Users\User\Downloads\SALAS - COPIA.xlsx"
+CAMINHO_DISCIPLINAS = r"C:\Users\User\Downloads\Resultados_Gerais (2).xlsx"
+OUTPUT_DIR = r"C:\Users\User\Downloads\Alocacao_Resultados"
 
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
 INDICE_DIAS = {d: i for i, d in enumerate(DIAS_SEMANA)}
@@ -39,13 +38,6 @@ def str_to_time(s):
     except Exception:
         return None
 
-def normalize_interval(start, end):
-    t1 = str_to_time(start)
-    t2 = str_to_time(end)
-    if not t1 or not t2:
-        return None
-    return f"{t1.strftime('%H:%M')} - {t2.strftime('%H:%M')}"
-
 def time_to_minutes(t):
     return t.hour * 60 + t.minute
 
@@ -56,39 +48,7 @@ def intervals_overlap(a_start, a_end, b_start, b_end):
     b_e = time_to_minutes(str_to_time(b_end))
     return max(a_s, b_s) < min(a_e, b_e)
 
-def gerar_intervalos(inicio: dt.time, fim: dt.time, passo: dt.timedelta):
-    if inicio is None or fim is None:
-        return []
-    cur = dt.datetime.combine(dt.date.today(), inicio)
-    end_dt = dt.datetime.combine(dt.date.today(), fim)
-    res = []
-    while cur < end_dt:
-        res.append(cur.time())
-        cur += passo
-    return res
-
-def exportar_dados(df: pd.DataFrame):
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    caminho = OUTPUT_DIR / "dados_disciplinas.xlsx"
-    df.to_excel(caminho, index=False)
-    buffer = BytesIO()
-    df.to_excel(buffer, index=False)
-    buffer.seek(0)
-    return buffer, caminho
-
 # -----------------------  Leitura e processamento  -----------------------
-@st.cache_data(show_spinner=False)
-def carregar_dados():
-    if not CAMINHO_SALAS.exists():
-        st.error(f"❌ Arquivo de salas não encontrado em: {CAMINHO_SALAS}")
-        st.stop()
-    if not CAMINHO_DISCIPLINAS.exists():
-        st.error(f"❌ Arquivo de disciplinas não encontrado em: {CAMINHO_DISCIPLINAS}")
-        st.stop()
-    df_salas = pd.read_excel(CAMINHO_SALAS)
-    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS)
-    return df_salas, df_turmas
-
 def criar_lista_salas(df_salas: pd.DataFrame):
     salas = []
     for _, row in df_salas.iterrows():
@@ -159,14 +119,15 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
             "DISCIPLINA": aloc.get("DISCIPLINA"),
             "TURMA": aloc.get("TURMA"),
             "DIAS": ",".join(dias_validos),
-            "HORARIO_INICIO": inicio_t,
-            "HORARIO_FINAL": fim_t,
+            "HORARIO_INICIO": inicio_t.strftime("%H:%M") if inicio_t else None,
+            "HORARIO_FINAL": fim_t.strftime("%H:%M") if fim_t else None,
             "HORARIOS_RAW": aloc.get("HORARIO") or aloc.get("HORÁRIO") or "",
             "ALUNOS": aloc.get("ALUNOS") or 0,
             "PROFESSOR": aloc.get("PROFESSOR"),
             "CAPACIDADE": next((s["CAPACIDADE"] for s in salas_ct if s["NOME"] == sala), None),
             "DATAS": datas,
-            "DESCRICAO": descricao
+            "DESCRICAO": descricao,
+            "TIPO": "DISCIPLINA"
         })
 
         sala_obj = next((s for s in salas_ct if s["NOME"] == sala), None)
@@ -203,9 +164,9 @@ def criar_workbook_horario_sala(sala_obj):
     wb = Workbook()
     ws = wb.active
     ws.title = sala_obj["NOME"][:31]
-
+    
     dias = DIAS_SEMANA
-    info_sala = f"Centro de Tecnologia | {sala_obj['NOME']} | Capacidade: {sala_obj['CAPACIDADE']}"
+    info_sala = f"Centro de Tecnologia \n {sala_obj['NOME']} - Período Letivo 2026.1 ({sala_obj['CAPACIDADE']})"
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(dias)+1)
     cell_info = ws.cell(row=1, column=1, value=info_sala)
     cell_info.font = Font(bold=True, size=12)
@@ -228,6 +189,40 @@ def criar_workbook_horario_sala(sala_obj):
                 continue
             cur = dt.datetime.combine(dt.date.today(), t_start)
             fim_dt = dt.datetime.combine(dt.date.today(), t_end)
+            
+            # [CORREÇÃO 1] Verifica se é reserva manual
+            is_reserva_manual = isinstance(desc, str) and desc.startswith("RESERVA_MANUAL")
+            
+            # [CORREÇÃO 2] Prepara o texto da célula e a fonte
+            texto_celula = desc
+            fonte_celula = Font(size=10)  # Fonte padrão para disciplinas
+            
+            if is_reserva_manual:
+                # Extrai o nome do evento
+                nome_evento = desc.replace("RESERVA_MANUAL - ", "").replace("RESERVA_MANUAL", "").strip()
+                
+                # [CORREÇÃO 3] Busca todas as datas desta mesma reserva pelo nome base
+                datas_reserva = set()
+                for r_data, r_ini, r_fim, r_desc in sala_obj["RESERVAS"]:
+                    r_nome_base = r_desc.replace("RESERVA_MANUAL - ", "").replace("RESERVA_MANUAL", "").strip()
+                    if r_ini == inicio and r_fim == fim and r_nome_base == nome_evento:
+                        datas_reserva.add(r_data)
+                
+                # [CORREÇÃO 4] Formata o texto com as datas
+                if len(datas_reserva) > 1:
+                    data_ini_fmt = min(datas_reserva).strftime("%d/%m")
+                    data_fim_fmt = max(datas_reserva).strftime("%d/%m")
+                    texto_celula = f"RESERVA_MANUAL - {nome_evento} ({data_ini_fmt} a {data_fim_fmt})"
+                elif len(datas_reserva) == 1:
+                    data_ini_fmt = min(datas_reserva).strftime("%d/%m")
+                    texto_celula = f"RESERVA_MANUAL - {nome_evento} ({data_ini_fmt})"
+                else:
+                    texto_celula = f"RESERVA_MANUAL - {nome_evento}"
+                
+                # [CORREÇÃO 5] Define fonte vermelha e negrito para reservas
+                fonte_celula = Font(color="FF0000", bold=True, size=10)
+            
+            # Preenche todas as células do intervalo de tempo
             while cur < fim_dt:
                 nxt = cur + dt.timedelta(minutes=30)
                 label = f"{cur.time().strftime('%H:%M')} - {nxt.time().strftime('%H:%M')}"
@@ -237,22 +232,10 @@ def criar_workbook_horario_sala(sala_obj):
                     cur = nxt
                     continue
 
-                # ---------- monta texto da célula ----------
-                if desc.startswith("RESERVA_MANUAL"):
-                    # busca todas as datas desta mesma reserva (mesmo horário)
-                    datas_reserva = {r_data for r_data, r_ini, r_fim, r_desc in sala_obj["RESERVAS"]
-                                     if r_ini == inicio and r_fim == fim and r_desc == desc}
-                    if len(datas_reserva) > 1:
-                        data_ini_fmt = min(datas_reserva).strftime("%d/%m")
-                        data_fim_fmt = max(datas_reserva).strftime("%d/%m")
-                        texto_celula = f"{desc} – {data_ini_fmt} – {data_fim_fmt}"
-                    else:
-                        data_ini_fmt = min(datas_reserva).strftime("%d/%m")
-                        texto_celula = f"{desc} – {data_ini_fmt}"
-                else:
-                    texto_celula = desc
-
-                ws.cell(row=row_idx, column=col, value=texto_celula)
+                # [CORREÇÃO 6] Cria a célula UMA ÚNICA VEZ com o texto e aplica a fonte
+                celula = ws.cell(row=row_idx, column=col, value=texto_celula)
+                celula.font = fonte_celula
+                
                 cur = nxt
 
     # ---------- mescla células iguais ----------
@@ -273,14 +256,16 @@ def criar_workbook_horario_sala(sala_obj):
     thin = Side(style="thin")
     borda = Border(left=thin, right=thin, top=thin, bottom=thin)
     align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    fonte = Font(size=10)
+    
     for row in ws.iter_rows(min_row=1, max_row=len(horas_minutos)+2, min_col=1, max_col=len(dias)+1):
         for cell in row:
             cell.border = borda
             cell.alignment = align
-            cell.font = fonte
+            if cell.font.size is None:
+                cell.font = Font(size=10)
+    
     for col in range(1, len(dias)+2):
-        ws.column_dimensions[get_column_letter(col)].width = 25
+        ws.column_dimensions[get_column_letter(col)].width = 30
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -294,6 +279,7 @@ def interface_interativa(salas_ct, df_processado):
     evento = st.text_input("Digite o nome do evento:")
     nome = st.text_input("Digite seu nome:")
     email_cliente = st.text_input("Digite seu email:")
+    capacity = st.number_input("Capacidade:", min_value=0, value=0)
     remetente = "solicitacaosalasct@gmail.com"
     destinatario = "reservasalact@ufc.br"
     assunto = "Teste - Solicitaçao de Salas"
@@ -331,12 +317,20 @@ def interface_interativa(salas_ct, df_processado):
         ocu = sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia, [])
         st.write(f"**{dia}**: " + (", ".join([f"{a}-{b} ({c})" for a, b, c in ocu]) if ocu else "Nenhum"))
 
+    # [CORREÇÃO 7] Inicializa session_state para armazenar reservas
+    if 'reservas_lista' not in st.session_state:
+        st.session_state.reservas_lista = []
+    
+    if 'df_completo' not in st.session_state:
+        st.session_state.df_completo = df_processado.copy()
+
     if st.button("📅 Solicitar Sala", key="btn_solicitar"):
         inicio_str = h_ini.strftime("%H:%M")
         fim_str = h_fim.strftime("%H:%M")
         mapping = {'MONDAY': 'SEGUNDA', 'TUESDAY': 'TERÇA', 'WEDNESDAY': 'QUARTA',
                    'THURSDAY': 'QUINTA', 'FRIDAY': 'SEXTA', 'SATURDAY': 'SÁBADO', 'SUNDAY': 'DOMINGO'}
 
+        # Prepara as datas a verificar
         if usa_fim == "SIM" and data_fim and dias_evento:
             datas_a_verificar = pd.date_range(data_ini, data_fim, freq='D') \
                                 .to_series() \
@@ -347,52 +341,89 @@ def interface_interativa(salas_ct, df_processado):
         else:
             datas_a_verificar = [data_ini]
 
+        # [CORREÇÃO 8] Verifica conflitos - capacidade FORA do loop
         conflitos = []
+        
+        # Verifica capacidade apenas uma vez
+        if capacity > sala_info["CAPACIDADE"]:
+            ociosidade = (-1) * (sala_info["CAPACIDADE"] - capacity)
+            conflitos.append({"tipo": "OCIOSIDADE", "valor": ociosidade})
+        
+        # Verifica conflitos de horário
         for data in datas_a_verificar:
             dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
             for a, b, desc in sala_info["HORARIOS_OCUPADOS_SEMANA"].get(dia_port, []):
                 if intervals_overlap(a, b, inicio_str, fim_str):
-                    conflitos.append((data.strftime("%d/%m"), a, b, desc))
+                    conflitos.append({
+                        "tipo": "HORARIO", 
+                        "data": data.strftime("%d/%m"), 
+                        "inicio": a, 
+                        "fim": b, 
+                        "desc": desc
+                    })
 
         if conflitos:
-            st.error("❌ Conflitos encontrados:\n" +
-                     "\n".join([f"{dt} {a}-{b} ({d})" for dt, a, b, d in conflitos]))
+            # [CORREÇÃO 9] Verifica tipo de conflito corretamente
+            tem_ociosidade = any(c.get("tipo") == "OCIOSIDADE" for c in conflitos)
+            tem_horario = any(c.get("tipo") == "HORARIO" for c in conflitos)
+            
+            if tem_ociosidade:
+                ociosidade_val = next(c["valor"] for c in conflitos if c.get("tipo") == "OCIOSIDADE")
+                st.error(f"❌ Conflito de Ociosidade: Capacidade excedida em {abs(ociosidade_val)} alunos (Capacidade da sala: {sala_info['CAPACIDADE']}, Solicitado: {capacity})")
+            
+            if tem_horario:
+                msg_horarios = "\n".join([
+                    f"• {c['data']}: {c['inicio']}-{c['fim']} ({c['desc']})" 
+                    for c in conflitos if c.get("tipo") == "HORARIO"
+                ])
+                st.error(f"❌ Conflitos de horário encontrados:\n{msg_horarios}")
+                
         else:
-            desc = evento.strip() if evento and str(evento).strip() else "RESERVA_MANUAL"
+            # [CORREÇÃO 10] Prepara descrição consistente
+            nome_evento = evento.strip() if evento and str(evento).strip() else "Evento Manual"
+            desc = f"RESERVA_MANUAL - {nome_evento}"
+            
+            # Adiciona à sala em memória
+            datas_list = []
             for data in datas_a_verificar:
                 dia_port = mapping.get(data.strftime("%A").upper(), data.strftime("%A").upper())
                 sala_info["RESERVAS"].append((data, inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS_SEMANA"].setdefault(dia_port, []).append(
                     (inicio_str, fim_str, desc))
                 sala_info["HORARIOS_OCUPADOS"].add(f"{inicio_str} - {fim_str}")
-                #corpo email
-                corpo_do_email = f"""Olá,
-                Solicito sala {sala_escolhida} - {data_ini} - {data_fim} - {h_ini}:{h_fim}
-                Enviar email resposta ao endereço: {email_cliente}
-                Atenciosamente,
-                {nome}
-                """
-                # Criar a mensagem
-                msg = MIMEMultipart()
-                msg['From'] = remetente
-                msg['To'] = destinatario
-                msg['Subject'] = assunto
-                msg.attach(MIMEText(corpo_do_email, 'plain'))
-                servidor_smtp = "smtp.gmail.com"
-                porta_smtp = 465
-                
-                # Conecta ao servidor SMTP de forma segura (SSL)
-                server = smtplib.SMTP_SSL(servidor_smtp, porta_smtp)
-                server.login(remetente, senha)
-                
-                # Envia o e-mail
-                texto = msg.as_string()
-                server.sendmail(remetente, destinatario, texto)
-                server.quit()
-                print("E-mail enviado com sucesso!")
-            st.success(f"✅ Evento registrado em {len(datas_a_verificar)} dia(s).")
+                datas_list.append(data)
+            
+            # [CORREÇÃO 11] Cria registro da reserva para o DataFrame
+            nova_reserva = {
+                "CURSO": "RESERVA",
+                "CODIGO": "MANUAL",
+                "SALA": sala_escolhida,
+                "DISCIPLINA": nome_evento,
+                "TURMA": "N/A",
+                "DIAS": ",".join([mapping.get(d.strftime("%A").upper(), d.strftime("%A").upper()) for d in datas_a_verificar]),
+                "HORARIO_INICIO": inicio_str,
+                "HORARIO_FINAL": fim_str,
+                "ALUNOS": capacity,
+                "PROFESSOR": nome,
+                "CAPACIDADE": sala_info["CAPACIDADE"],
+                "DATAS": datas_list,
+                "DESCRICAO": desc,
+                "TIPO": "RESERVA_MANUAL"
+            }
+            
+            # Adiciona à lista de reservas no session_state
+            st.session_state.reservas_lista.append(nova_reserva)
+            
+            # [CORREÇÃO 12] Atualiza o DataFrame completo com todas as reservas
+            df_reservas = pd.DataFrame(st.session_state.reservas_lista)
+            st.session_state.df_completo = pd.concat([df_processado, df_reservas], ignore_index=True)
+            
+            st.success(f"✅ Evento \"{nome_evento}\" registrado em {len(datas_a_verificar)} dia(s) na sala {sala_escolhida}.")
+            st.info("💾 As reservas serão incluídas no download de 'dados_disciplinas.xlsx'")
 
     st.divider()
+    
+    # Botão de download do Excel da sala específica
     if st.download_button("📥 Baixar Excel (Sala)",
                           data=criar_workbook_horario_sala(sala_info),
                           file_name=f"horario_{sala_escolhida}.xlsx",
@@ -400,19 +431,31 @@ def interface_interativa(salas_ct, df_processado):
         pass
 
     st.divider()
-    st.subheader("Exportar dados processados (todas as turmas)")
+    st.subheader("Exportar dados processados (todas as turmas + reservas)")
+    
+    # [CORREÇÃO 13] Usa o DataFrame atualizado com as reservas do session_state
     buf_df = BytesIO()
-    df_processado.to_excel(buf_df, index=False)
+    st.session_state.df_completo.to_excel(buf_df, index=False)
     buf_df.seek(0)
     st.download_button("📥 Baixar dados_disciplinas.xlsx", data=buf_df,
                        file_name="dados_disciplinas.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    
+    # Mostra preview das reservas manuais
+    if len(st.session_state.reservas_lista) > 0:
+        st.divider()
+        st.subheader("📋 Reservas Manuais Registradas nesta Sessão")
+        df_preview = pd.DataFrame(st.session_state.reservas_lista)
+        st.dataframe(df_preview[["SALA", "DISCIPLINA", "DIAS", "HORARIO_INICIO", "HORARIO_FINAL", "ALUNOS", "PROFESSOR"]], 
+                    use_container_width=True)
 
 # -----------------------  Main  -----------------------
 def main():
     st.title("🏫 Sistema de Alocação de Salas – CT")
     with st.spinner("Carregando dados..."):
-        df_salas, df_turmas = carregar_dados()
+        arquivo_sala = pd.read_excel(CAMINHO_SALAS)
+        arquivo_disciplina = pd.read_excel(CAMINHO_DISCIPLINAS)
+        df_salas, df_turmas = arquivo_sala, arquivo_disciplina
         salas_ct = criar_lista_salas(df_salas)
         todas_as_datas = gerar_datas(df_turmas)
         df_dados = processar_alocacoes(df_turmas, todas_as_datas, salas_ct)
