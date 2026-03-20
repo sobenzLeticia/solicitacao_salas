@@ -10,15 +10,51 @@ from openpyxl.utils import get_column_letter
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import datetime as dt
+from pathlib import Path
+import pandas as pd
+import streamlit as st
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Side, Font
+from openpyxl.utils import get_column_letter
 
-# -----------------------  Configurações  -----------------------
+
+# ===============================
+# CONFIGURAÇÕES GERAIS
+# ===============================
+
+# Caminhos relativos dentro do repositório
 BASE_DIR = Path(__file__).parent
-CAMINHO_SALAS = r"C:\Users\User\Downloads\SALAS - COPIA.xlsx"
-CAMINHO_DISCIPLINAS = r"C:\Users\User\Downloads\Resultados_Gerais (2).xlsx"
-OUTPUT_DIR = r"C:\Users\User\Downloads\Alocacao_Resultados"
+DATA_DIR = BASE_DIR
+
+CAMINHO_SALAS = DATA_DIR / "SALAS - COPIA.xlsx"
+CAMINHO_DISCIPLINAS = DATA_DIR / "Resultados_Gerais.xlsx"
+OUTPUT_DIR = BASE_DIR / "resultados"
 
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
 INDICE_DIAS = {d: i for i, d in enumerate(DIAS_SEMANA)}
+
+
+# ===============================
+# FUNÇÕES DE LEITURA E PROCESSAMENTO
+# ===============================
+
+@st.cache_data(show_spinner=False)
+def carregar_dados():
+    """Carrega os dados de salas e turmas do repositório."""
+    if not CAMINHO_SALAS.exists():
+        st.error(f"❌ Arquivo de salas não encontrado em: {CAMINHO_SALAS}")
+        st.stop()
+
+    if not CAMINHO_DISCIPLINAS.exists():
+        st.error(f"❌ Arquivo de disciplinas não encontrado em: {CAMINHO_DISCIPLINAS}")
+        st.stop()
+
+    df_salas = pd.read_excel(CAMINHO_SALAS)
+    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS)
+    return df_salas, df_turmas
+
 
 # -----------------------  Utils horário  -----------------------
 def str_to_time(s):
