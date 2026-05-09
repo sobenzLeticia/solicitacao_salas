@@ -7,21 +7,29 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Side, Font
 from openpyxl.utils import get_column_letter
 
-from dotenv import load_dotenv
-from pathlib import Path
-import os
-
-# Carrega variáveis do .env
-env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=env_path)
-
-# Agora as variáveis estão disponíveis via os.getenv()
-SMTP_SERVIDOR = os.getenv("SMTP_SERVIDOR", "smtp.ufc.br")
-SMTP_PORTA = int(os.getenv("SMTP_PORTA", "587"))
-SMTP_USUARIO = os.getenv("SMTP_USUARIO", "")
-SMTP_SENHA = os.getenv("SMTP_SENHA", "")
-EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "reservasalact-naoresponda@ufc.br")
-# ===============================
+try:
+    EMAIL_CONFIG = st.secrets["email"]
+    SMTP_SERVIDOR = EMAIL_CONFIG["servidor"]
+    SMTP_PORTA = int(EMAIL_CONFIG["porta"])
+    SMTP_USUARIO = EMAIL_CONFIG["usuario"]
+    SMTP_SENHA = EMAIL_CONFIG["senha"]
+    EMAIL_REMETENTE = EMAIL_CONFIG["remetente"]
+    st.sidebar.success("🔐 Secrets carregados do Streamlit Cloud")
+except (FileNotFoundError, KeyError):
+    # Fallback para desenvolvimento local
+    from dotenv import load_dotenv
+    from pathlib import Path
+    
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+    
+    SMTP_SERVIDOR = os.getenv("SMTP_SERVIDOR", "smtp.ufc.br")
+    SMTP_PORTA = int(os.getenv("SMTP_PORTA", "587"))
+    SMTP_USUARIO = os.getenv("SMTP_USUARIO", "")
+    SMTP_SENHA = os.getenv("SMTP_SENHA", "")
+    EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE", "reservasalact-naoresponda@ufc.br")
+    st.sidebar.info("💻 Modo local: usando .env ou variáveis de ambiente")# ===============================
 # CONFIGURAÇÕES GERAIS
 # ===============================
 
