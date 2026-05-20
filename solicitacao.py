@@ -13,7 +13,6 @@ from email.mime.text import MIMEText
 import requests
 import base64
 
-
 # -----------------------  Configurações  -----------------------
 # ===============================
 # CONFIGURAÇÕES GERAIS
@@ -566,6 +565,8 @@ def interface_interativa(salas_ct, df_processado):
 # -----------------------  Main  -----------------------
 def main():
     st.title("🏫 Sistema de Alocação de Salas – CT")
+    # Adicione isso TEMPORARIAMENTE só para debug
+    st.write("Secrets disponíveis:", list(st.secrets.keys()))
     with st.spinner("Carregando dados..."):
         arquivo_sala = pd.read_excel(CAMINHO_SALAS)
         arquivo_disciplina = pd.read_excel(CAMINHO_DISCIPLINAS)
