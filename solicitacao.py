@@ -567,6 +567,7 @@ def main():
     st.title("🏫 Sistema de Alocação de Salas – CT")
     # Adicione isso TEMPORARIAMENTE só para debug
     st.write("Secrets disponíveis:", list(st.secrets.keys()))
+    st.write("GITHUB_TOKEN existe?", "GITHUB_TOKEN" in st.secrets)
     with st.spinner("Carregando dados..."):
         arquivo_sala = pd.read_excel(CAMINHO_SALAS)
         arquivo_disciplina = pd.read_excel(CAMINHO_DISCIPLINAS)
