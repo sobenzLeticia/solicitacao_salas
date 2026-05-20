@@ -1,4 +1,4 @@
 # .streamlit/secrets.toml (local, para teste)
-GITHUB_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
+GITHUB_TOKEN = "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"
 REPO_NAME = "sobenzLeticia/solicitacao_salas"
 BRANCH = "main"
