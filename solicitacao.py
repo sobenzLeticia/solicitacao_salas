@@ -10,14 +10,8 @@ from openpyxl.utils import get_column_letter
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import datetime as dt
-from pathlib import Path
-import pandas as pd
-import streamlit as st
-from io import BytesIO
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Side, Font
-from openpyxl.utils import get_column_letter
+import requests
+import base64
 
 
 # -----------------------  Configurações  -----------------------
@@ -27,9 +21,6 @@ from openpyxl.utils import get_column_letter
 
 # Caminhos relativos dentro do repositório
 BASE_DIR = Path(__file__).parent
-CAMINHO_SALAS = r"C:\Users\User\Downloads\SALAS - COPIA.xlsx"
-CAMINHO_DISCIPLINAS = r"C:\Users\User\Downloads\Resultados_Gerais (2).xlsx"
-OUTPUT_DIR = r"C:\Users\User\Downloads\Alocacao_Resultados"
 DATA_DIR = BASE_DIR
 
 CAMINHO_SALAS = DATA_DIR / "SALAS - COPIA.xlsx"
@@ -38,6 +29,70 @@ OUTPUT_DIR = BASE_DIR / "resultados"
 
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
 INDICE_DIAS = {d: i for i, d in enumerate(DIAS_SEMANA)}
+
+
+# ===============================
+# FUNÇÕES DE COMMIT NO GITHUB
+# ===============================
+
+def commit_dados_disciplinas(df, mensagem=None):
+    """
+    Salva o DataFrame diretamente no repositório do GitHub via API.
+    Substitui o arquivo antigo pelo novo.
+    """
+    try:
+        token = st.secrets["GITHUB_TOKEN"]
+        repo = st.secrets["REPO_NAME"]
+        branch = st.secrets.get("BRANCH", "main")
+    except KeyError as e:
+        st.error(f"❌ Secret não configurado: {e}. Vá em Settings → Secrets no Streamlit Cloud.")
+        return False
+    
+    # Nome do arquivo no repositório (mesmo nome que você usa para carregar)
+    caminho_arquivo = "Resultados_Gerais.xlsx"
+    
+    if mensagem is None:
+        mensagem = f"Atualiza alocação de salas - {dt.datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    
+    # 1. Converte DataFrame para bytes em memória (não salva no disco!)
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False, engine='openpyxl')
+    conteudo_base64 = base64.b64encode(buffer.getvalue()).decode()
+    
+    # 2. Busca o SHA do arquivo atual (necessário para atualizar)
+    url_api = f"https://api.github.com/repos/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    resp_get = requests.get(url_api, headers=headers, params={"ref": branch})
+    
+    sha_atual = None
+    if resp_get.status_code == 200:
+        sha_atual = resp_get.json().get("sha")
+    elif resp_get.status_code == 404:
+        pass  # Arquivo não existe ainda, vai criar
+    else:
+        st.error(f"Erro ao buscar arquivo no GitHub: {resp_get.status_code}")
+        return False
+    
+    # 3. Faz o commit (cria ou atualiza)
+    payload = {
+        "message": mensagem,
+        "content": conteudo_base64,
+        "branch": branch
+    }
+    if sha_atual:
+        payload["sha"] = sha_atual
+    
+    resp_put = requests.put(url_api, headers=headers, json=payload)
+    
+    if resp_put.status_code in [200, 201]:
+        return True
+    else:
+        st.error(f"Erro no commit: {resp_put.status_code} - {resp_put.text}")
+        return False
 
 
 # ===============================
@@ -471,15 +526,34 @@ def interface_interativa(salas_ct, df_processado):
         pass
 
     st.divider()
-    st.subheader("Exportar dados processados (todas as turmas + reservas)")
+    
+    # ==================== SEÇÃO DE SALVAMENTO NO GITHUB ====================
+    st.subheader("💾 Salvar no Repositório GitHub")
 
-    # [CORREÇÃO 13] Usa o DataFrame atualizado com as reservas do session_state
-    buf_df = BytesIO()
-    st.session_state.df_completo.to_excel(buf_df, index=False)
-    buf_df.seek(0)
-    st.download_button("📥 Baixar dados_disciplinas.xlsx", data=buf_df,
-                       file_name="dados_disciplinas.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("☁️ Salvar no GitHub (substituir Resultados_Gerais.xlsx)", type="primary"):
+            with st.spinner("Fazendo commit no GitHub..."):
+                sucesso = commit_dados_disciplinas(st.session_state.df_completo)
+                if sucesso:
+                    st.success("✅ Arquivo atualizado no GitHub com sucesso!")
+                    st.balloons()
+                    st.info("🔄 A próxima vez que o app carregar, já terá os dados atualizados.")
+                else:
+                    st.error("❌ Falha ao salvar no GitHub. Verifique o token e as permissões.")
+
+    with col2:
+        # Mantém download como backup
+        buf_df = BytesIO()
+        st.session_state.df_completo.to_excel(buf_df, index=False, engine='openpyxl')
+        buf_df.seek(0)
+        st.download_button(
+            "📥 Baixar cópia local (backup)", 
+            data=buf_df,
+            file_name="dados_disciplinas_backup.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     # Mostra preview das reservas manuais
     if len(st.session_state.reservas_lista) > 0:
