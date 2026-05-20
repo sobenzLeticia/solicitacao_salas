@@ -1,4 +1,4 @@
-[server]
-port = 8501
-enableCORS = false
-enableXsrfProtection = false
+# .streamlit/secrets.toml (local, para teste)
+GITHUB_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
+REPO_NAME = "sobenzLeticia/solicitacao_salas"
+BRANCH = "main"
