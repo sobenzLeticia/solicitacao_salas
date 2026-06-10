@@ -23,7 +23,7 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR
 
 CAMINHO_SALAS = DATA_DIR / "SALAS - COPIA.xlsx"
-CAMINHO_DISCIPLINAS = DATA_DIR / "Resultados_Gerais.xlsx"
+CAMINHO_DISCIPLINAS = DATA_DIR / "dados_disciplinas.xlsx"
 OUTPUT_DIR = BASE_DIR / "resultados"
 
 DIAS_SEMANA = ["SEGUNDA", "TERÇA", "QUARTA", "QUINTA", "SEXTA", "SÁBADO"]
