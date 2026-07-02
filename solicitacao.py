@@ -110,7 +110,9 @@ def carregar_dados():
         st.stop()
 
     df_salas = pd.read_excel(CAMINHO_SALAS)
-    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS)
+    # [CORREÇÃO] Especifica a aba "salas" ao invés de ler a primeira aba (Planilha2)
+    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS, sheet_name="salas")
+    print(df_turmas)
     return df_salas, df_turmas
 
 
@@ -246,6 +248,7 @@ def processar_alocacoes(df_turmas: pd.DataFrame, todas_as_datas, salas_ct: list)
                                 sala_obj["HORARIOS_OCUPADOS"].add(f"{h1} - {h2}")
                         except Exception:
                             continue
+    print(registros)
     return pd.DataFrame(registros)
 
 # -----------------------  Cria workbook por sala  -----------------------
@@ -567,7 +570,8 @@ def main():
     st.title("🏫 Sistema de Alocação de Salas – CT")
     with st.spinner("Carregando dados..."):
         arquivo_sala = pd.read_excel(CAMINHO_SALAS)
-        arquivo_disciplina = pd.read_excel(CAMINHO_DISCIPLINAS)
+        # [CORREÇÃO] Especifica a aba "salas" ao invés de ler a primeira aba (Planilha2)
+        arquivo_disciplina = pd.read_excel(CAMINHO_DISCIPLINAS, sheet_name="salas")
         df_salas, df_turmas = arquivo_sala, arquivo_disciplina
         salas_ct = criar_lista_salas(df_salas)
         todas_as_datas = gerar_datas(df_turmas)
