@@ -48,7 +48,7 @@ def commit_dados_disciplinas(df, mensagem=None):
         return False
     
     # Nome do arquivo no repositório (mesmo nome que você usa para carregar)
-    caminho_arquivo = "Resultados_Gerais.xlsx"
+    caminho_arquivo = "dados_disciplinas.xlsx"
     
     if mensagem is None:
         mensagem = f"Atualiza alocação de salas - {dt.datetime.now().strftime('%d/%m/%Y %H:%M')}"
