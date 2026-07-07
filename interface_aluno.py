@@ -94,7 +94,7 @@ def carregar_dados():
         st.error(f"❌ Arquivo de disciplinas não encontrado em: {CAMINHO_DISCIPLINAS}")
         st.stop()
 
-    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS, sheet_name="salas")
+    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS)
 
     # Extrair lista de salas e capacidades do próprio arquivo de disciplinas
     salas_info = {}
