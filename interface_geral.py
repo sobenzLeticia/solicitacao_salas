@@ -1,7 +1,7 @@
 import streamlit as size_config  # Apenas para o padrão
 import streamlit as st
 import interface_aluno as int_aluno
-import solicitacao_salas_2 as sol_salas
+import solicitacao as sol_salas
 
 # 1. Configuração inicial da página e do estado da sessão
 st.set_page_config(page_title="Sistema de Login", page_icon="🔒", layout="centered")
