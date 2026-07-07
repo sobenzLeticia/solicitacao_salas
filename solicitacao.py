@@ -111,7 +111,7 @@ def carregar_dados():
 
     df_salas = pd.read_excel(CAMINHO_SALAS)
     # [CORREÇÃO] Especifica a aba "salas" ao invés de ler a primeira aba (Planilha2)
-    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS, sheet_name="salas")
+    df_turmas = pd.read_excel(CAMINHO_DISCIPLINAS)
     print(df_turmas)
     return df_salas, df_turmas
 
